@@ -3,6 +3,9 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 
 from irobot_create_msgs.action import WallFollow
+from irobot_create_msgs.msg import DockStatus
+
+from rclpy.qos import qos_profile_sensor_data
 
 
 class DataHarvester(Node):
@@ -15,6 +18,23 @@ class DataHarvester(Node):
 
         # Client for wall follow action
         self.wall_follow_client = ActionClient(self, WallFollow, 'wall_follow')
+
+        # Subscriber to dock status
+        self.dock_status = False
+        self.subscriber_dock_status = self.create_subscription(
+            DockStatus,
+            'dock_status',
+            self.subscriber_dock_status_callback,
+            qos_profile_sensor_data,
+        )
+
+    def subscriber_dock_status_callback(self, msg):
+        """
+        Callback that update dock status
+        :param msg: message with DockStatus type
+        :return: None
+        """
+        self.dock_status = bool(msg.is_docked)
 
     def send_goal_wall_follow(self, follow_side, sec):
         """
