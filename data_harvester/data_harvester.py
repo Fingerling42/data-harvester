@@ -1,6 +1,8 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 
 from irobot_create_msgs.action import WallFollow
 from irobot_create_msgs.msg import DockStatus
@@ -17,16 +19,46 @@ class DataHarvester(Node):
         super().__init__("data_harvester")
 
         # Client for wall follow action
-        self.wall_follow_client = ActionClient(self, WallFollow, 'wall_follow')
+        client_callback_group = MutuallyExclusiveCallbackGroup()
+        self.wall_follow_client = ActionClient(
+            self,
+            WallFollow,
+            'wall_follow',
+            callback_group=client_callback_group,
+        )
+
+        # Wait for availability of service
+        while not self.wall_follow_client.wait_for_server(timeout_sec=1.0):
+            self.get_logger().warn('Wall follow server is not loaded, waiting...')
 
         # Subscriber to dock status
-        self.dock_status = False
+        self.dock_status = None
+        workload_callback_group = MutuallyExclusiveCallbackGroup()
         self.subscriber_dock_status = self.create_subscription(
             DockStatus,
             'dock_status',
             self.subscriber_dock_status_callback,
             qos_profile_sensor_data,
+            callback_group=workload_callback_group,
         )
+
+        # Timer for starting all workload (indicated callback group that cannot being executed
+        # in parallel to avoid deadlocks)
+        self.timer_workload = self.create_timer(
+            5,
+            self.timer_workload_callback,
+            callback_group=workload_callback_group,
+        )
+
+    def timer_workload_callback(self):
+
+        self.timer_workload.cancel()
+
+        self.get_logger().info("Dock status is: "+ str(self.dock_status))
+
+        # Making request to wall follow
+        secs = 0.5 * 60
+        self.send_goal_wall_follow(WallFollow.Goal.FOLLOW_RIGHT, secs)
 
     def subscriber_dock_status_callback(self, msg):
         """
@@ -51,7 +83,6 @@ class DataHarvester(Node):
         goal_msg.max_runtime.nanosec = 0
 
         # Making a request and waiting for feedback
-        self.wall_follow_client.wait_for_server()
         send_goal_future = self.wall_follow_client.send_goal_async(goal_msg)
         send_goal_future.add_done_callback(self.wall_follow_response_callback)
 
@@ -80,19 +111,42 @@ class DataHarvester(Node):
         :return: None
         """
         self.get_logger().info('The wall follow mission is complete')
-        rclpy.shutdown()
+        self.destroy_node()
+
+    def __enter__(self):
+        """
+        Enter the object runtime context
+        :return: object itself
+        """
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Exit the object runtime context
+        :param exc_type: exception that caused the context to be exited
+        :param exc_val: exception value
+        :param exc_tb: exception traceback
+        :return: None
+        """
 
 
 def main(args=None):
     rclpy.init(args=args)
 
-    data_harvester = DataHarvester()
+    executor = MultiThreadedExecutor()
 
-    # Making request to wall follow
-    secs = 2 * 60
-    data_harvester.send_goal_wall_follow(WallFollow.Goal.FOLLOW_RIGHT, secs)
+    with DataHarvester() as data_harvester:
+        try:
+            executor.add_node(data_harvester)
+            executor.spin()
+        except KeyboardInterrupt:
+            data_harvester.get_logger().warn("Killing the turtlesim_robonomics_handler...")
 
-    rclpy.spin(data_harvester)
+    # Destroy the node explicitly
+    # (optional - otherwise it will be done automatically
+    # when the garbage collector destroys the node object)
+    data_harvester.destroy_node()
+    rclpy.shutdown()
 
 
 if __name__ == '__main__':
