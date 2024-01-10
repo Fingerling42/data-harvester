@@ -1,6 +1,8 @@
 from setuptools import find_packages, setup
+import os
+from glob import glob
 
-package_name = 'turtlebot4_map_saver'
+package_name = 'data_harvester'
 
 setup(
     name=package_name,
@@ -15,12 +17,12 @@ setup(
     zip_safe=True,
     maintainer='Ivan Berman',
     maintainer_email='berman@robonomics.network',
-    description='Simple saver of Turtlebot 4 SLAM map with moving along the wall',
+    description='The package that transforms Turtlebot 4 to data harvester',
     license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'turtlebot4_map_saver = turtlebot4_map_saver.turtlebot4_map_saver:main',
+            'data_harvester = data_harvester.data_harvester:main',
         ],
     },
 )

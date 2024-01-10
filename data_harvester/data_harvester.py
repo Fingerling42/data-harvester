@@ -5,13 +5,13 @@ from rclpy.action import ActionClient
 from irobot_create_msgs.action import WallFollow
 
 
-class Turtlebot4MapSaver(Node):
+class DataHarvester(Node):
     """
     A class that creates clients for all Turtlebot 4 ROS 2 stack services
     """
 
     def __init__(self):
-        super().__init__("turtlebot4_map_saver")
+        super().__init__("data_harvester")
 
         # Client for wall follow action
         self.wall_follow_client = ActionClient(self, WallFollow, 'wall_follow')
@@ -66,13 +66,13 @@ class Turtlebot4MapSaver(Node):
 def main(args=None):
     rclpy.init(args=args)
 
-    turtlebot4_map_saver = Turtlebot4MapSaver()
+    data_harvester = DataHarvester()
 
     # Making request to wall follow
     secs = 2 * 60
-    turtlebot4_map_saver.send_goal_wall_follow(WallFollow.Goal.FOLLOW_RIGHT, secs)
+    data_harvester.send_goal_wall_follow(WallFollow.Goal.FOLLOW_RIGHT, secs)
 
-    rclpy.spin(turtlebot4_map_saver)
+    rclpy.spin(data_harvester)
 
 
 if __name__ == '__main__':
