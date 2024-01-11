@@ -25,6 +25,17 @@ class DataHarvester(Node):
     def __init__(self):
         super().__init__("data_harvester") # node name
 
+        # Declare used parameters
+        self.declare_parameters(
+            namespace='',
+            parameters=[
+                ('runtime_min', rclpy.Parameter.Type.DOUBLE),
+            ]
+        )
+
+        # Get used parameters
+        self.runtime_min = self.get_parameter('runtime_min')
+
         # Creating client for wall follow action and wait for its availability
         client_callback_group = MutuallyExclusiveCallbackGroup()
         self.wall_follow_client = ActionClient(
@@ -82,8 +93,8 @@ class DataHarvester(Node):
                 time.sleep(2)
 
         # Making request to wall follow
-        secs = 1 * 30
-        self.send_goal_wall_follow(WallFollow.Goal.FOLLOW_RIGHT, secs)
+        runtime_sec = int(self.runtime_min.value * 60)
+        self.send_goal_wall_follow(WallFollow.Goal.FOLLOW_RIGHT, runtime_sec)
 
     def subscriber_dock_status_callback(self, msg):
         """

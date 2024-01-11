@@ -1,0 +1,3 @@
+data_harvester:
+  ros__parameters:
+    runtime_min: 0.5
