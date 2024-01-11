@@ -1,10 +1,17 @@
+import time
+
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+
+# Groups that cannot being executed in parallel to avoid deadlocks
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+
 from rclpy.executors import MultiThreadedExecutor
 
-from irobot_create_msgs.action import WallFollow
+from action_msgs.msg import GoalStatus
+
+from irobot_create_msgs.action import WallFollow, Undock
 from irobot_create_msgs.msg import DockStatus
 
 from rclpy.qos import qos_profile_sensor_data
@@ -12,13 +19,13 @@ from rclpy.qos import qos_profile_sensor_data
 
 class DataHarvester(Node):
     """
-    A class that creates clients for all Turtlebot 4 ROS 2 stack services
+    A class for handle all necessary function of Turtlebot 4 ROS 2 stack: creating clients, make action requests
     """
 
     def __init__(self):
-        super().__init__("data_harvester")
+        super().__init__("data_harvester") # node name
 
-        # Client for wall follow action
+        # Creating client for wall follow action and wait for its availability
         client_callback_group = MutuallyExclusiveCallbackGroup()
         self.wall_follow_client = ActionClient(
             self,
@@ -26,12 +33,23 @@ class DataHarvester(Node):
             'wall_follow',
             callback_group=client_callback_group,
         )
-
-        # Wait for availability of service
         while not self.wall_follow_client.wait_for_server(timeout_sec=1.0):
-            self.get_logger().warn('Wall follow server is not loaded, waiting...')
+            self.get_logger().warn('Wall follow server is not available, waiting...')
 
-        # Subscriber to dock status
+        # Creating client for undock from charging station action and wait for its availability
+        self.undock_client = ActionClient(
+            self,
+            Undock,
+            'undock',
+            callback_group=client_callback_group,
+        )
+        while not self.undock_client.wait_for_server(timeout_sec=1.0):
+            self.get_logger().warn('Undock server is not available, waiting...')
+
+        # Explicitly setting the goal status to be checked next
+        self.undock_client_status = GoalStatus.STATUS_EXECUTING
+
+        # Creating subscriber to dock status
         self.dock_status = None
         workload_callback_group = MutuallyExclusiveCallbackGroup()
         self.subscriber_dock_status = self.create_subscription(
@@ -42,8 +60,7 @@ class DataHarvester(Node):
             callback_group=workload_callback_group,
         )
 
-        # Timer for starting all workload (indicated callback group that cannot being executed
-        # in parallel to avoid deadlocks)
+        # Timer for starting all workload
         self.timer_workload = self.create_timer(
             5,
             self.timer_workload_callback,
@@ -51,13 +68,21 @@ class DataHarvester(Node):
         )
 
     def timer_workload_callback(self):
+        """
+        Main workload timer callback after which the robot starts
+        :return: None
+        """
+        self.timer_workload.cancel() # timer is needed only once
 
-        self.timer_workload.cancel()
-
-        self.get_logger().info("Dock status is: "+ str(self.dock_status))
+        # Check if the robot is docked, if not - start undocking
+        if self.dock_status is True:
+            self.get_logger().info("The robot is docked, need to undock it first")
+            self.send_goal_undock()
+            while self.undock_client_status != GoalStatus.STATUS_SUCCEEDED:
+                time.sleep(2)
 
         # Making request to wall follow
-        secs = 0.5 * 60
+        secs = 1 * 30
         self.send_goal_wall_follow(WallFollow.Goal.FOLLOW_RIGHT, secs)
 
     def subscriber_dock_status_callback(self, msg):
@@ -67,6 +92,31 @@ class DataHarvester(Node):
         :return: None
         """
         self.dock_status = bool(msg.is_docked)
+
+    def send_goal_undock(self):
+        """
+        A function for sending goal to undock action
+        :return: None
+        """
+        goal_msg = Undock.Goal()
+        send_goal_future = self.undock_client.send_goal_async(goal_msg)
+        send_goal_future.add_done_callback(self.undock_response_callback)
+
+    def undock_response_callback(self, future):
+        # Checking that goal is accepted
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.get_logger().warn('Cannot undock, please check')
+            return
+        self.get_logger().info('Going to undock robot from station')
+
+        # Waiting for finishing the goal to proceed for its result
+        get_result_future = goal_handle.get_result_async()
+        get_result_future.add_done_callback(self.undock_result_callback)
+
+    def undock_result_callback(self, future):
+        self.get_logger().info('Finished undocking task')
+        self.undock_client_status = GoalStatus.STATUS_SUCCEEDED
 
     def send_goal_wall_follow(self, follow_side, sec):
         """
@@ -87,31 +137,21 @@ class DataHarvester(Node):
         send_goal_future.add_done_callback(self.wall_follow_response_callback)
 
     def wall_follow_response_callback(self, future):
-        """
-        A feedback processing
-        :param future: feedback response from action
-        :return: None
-        """
-
         # Checking that goal is accepted
         goal_handle = future.result()
         if not goal_handle.accepted:
-            self.get_logger().info('Cannot follow wall')
+            self.get_logger().info('Cannot start data harvesting, please check')
             return
-        self.get_logger().info('Wall following goal accepted')
+        self.get_logger().info('Starting data harvesting')
 
         # Waiting for finishing the goal to proceed for its result
         get_result_future = goal_handle.get_result_async()
         get_result_future.add_done_callback(self.wall_follow_result_callback)
 
     def wall_follow_result_callback(self, future):
-        """
-        A result processing with closing the node
-        :param future: result response from action
-        :return: None
-        """
-        self.get_logger().info('The wall follow mission is complete')
-        self.destroy_node()
+        runtime = future.result().result.runtime.sec
+        self.get_logger().info('The data harvesting is complete, elapsed time: %d sec' % runtime)
+        rclpy.shutdown()
 
     def __enter__(self):
         """
@@ -140,7 +180,7 @@ def main(args=None):
             executor.add_node(data_harvester)
             executor.spin()
         except KeyboardInterrupt:
-            data_harvester.get_logger().warn("Killing the turtlesim_robonomics_handler...")
+            data_harvester.get_logger().warn("Killing the data harvester node...")
 
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
