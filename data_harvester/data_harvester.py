@@ -14,6 +14,8 @@ from action_msgs.msg import GoalStatus
 from irobot_create_msgs.action import WallFollow, Undock
 from irobot_create_msgs.msg import DockStatus
 
+from slam_toolbox.srv import SaveMap
+
 from rclpy.qos import qos_profile_sensor_data
 
 
@@ -30,11 +32,13 @@ class DataHarvester(Node):
             namespace='',
             parameters=[
                 ('runtime_min', rclpy.Parameter.Type.DOUBLE),
+                ('map_name', rclpy.Parameter.Type.STRING)
             ]
         )
 
         # Get used parameters
         self.runtime_min = self.get_parameter('runtime_min')
+        self.map_name = self.get_parameter('map_name')
 
         # Creating client for wall follow action and wait for its availability
         client_callback_group = MutuallyExclusiveCallbackGroup()
@@ -60,6 +64,15 @@ class DataHarvester(Node):
         # Explicitly setting the goal status to be checked next
         self.undock_client_status = GoalStatus.STATUS_EXECUTING
 
+        # Creating client for map saver service
+        self.map_saver_client = self.create_client(
+            SaveMap,
+            'slam_toolbox/save_map',
+            callback_group=client_callback_group,
+        )
+        while not self.map_saver_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().warn('Map saver server is not available, waiting...')
+
         # Creating subscriber to dock status
         self.dock_status = None
         workload_callback_group = MutuallyExclusiveCallbackGroup()
@@ -77,6 +90,14 @@ class DataHarvester(Node):
             self.timer_workload_callback,
             callback_group=workload_callback_group,
         )
+
+    def save_map(self):
+        request = SaveMap.Request()
+        request.name.data = self.map_name
+
+        future = self.map_saver_client.call_async(request)
+        self.executor.spin_until_future_complete(future)
+        return future.result()
 
     def timer_workload_callback(self):
         """
@@ -162,6 +183,10 @@ class DataHarvester(Node):
     def wall_follow_result_callback(self, future):
         runtime = future.result().result.runtime.sec
         self.get_logger().info('The data harvesting is complete, elapsed time: %d sec' % runtime)
+        self.get_logger().info('Saving the map to workspace dir...')
+        save_map_response = self.save_map()
+        if save_map_response.result == 0:
+            self.get_logger().info('Map is successfully saved')
         rclpy.shutdown()
 
     def __enter__(self):
