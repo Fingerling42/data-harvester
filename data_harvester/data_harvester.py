@@ -92,6 +92,10 @@ class DataHarvester(Node):
         )
 
     def save_map(self):
+        """
+        A function for making request to map saver
+        :return: Result of request with map saving status
+        """
         request = SaveMap.Request()
         request.name.data = self.map_name
 
