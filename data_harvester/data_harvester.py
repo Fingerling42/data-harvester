@@ -97,7 +97,7 @@ class DataHarvester(Node):
         :return: Result of request with map saving status
         """
         request = SaveMap.Request()
-        request.name.data = self.map_name
+        request.name.data = self.map_name.value
 
         future = self.map_saver_client.call_async(request)
         self.executor.spin_until_future_complete(future)
