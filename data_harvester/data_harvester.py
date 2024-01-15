@@ -14,7 +14,7 @@ from action_msgs.msg import GoalStatus
 from irobot_create_msgs.action import WallFollow, Undock
 from irobot_create_msgs.msg import DockStatus
 
-from slam_toolbox.srv import SaveMap
+from slam_toolbox.srv import SaveMap, SerializePoseGraph
 
 from rclpy.qos import qos_profile_sensor_data
 
@@ -64,7 +64,7 @@ class DataHarvester(Node):
         # Explicitly setting the goal status to be checked next
         self.undock_client_status = GoalStatus.STATUS_EXECUTING
 
-        # Creating client for map saver service
+        # Creating clients for map saver service: first for pgm format, second for posegraph format
         self.map_saver_client = self.create_client(
             SaveMap,
             'slam_toolbox/save_map',
@@ -72,6 +72,12 @@ class DataHarvester(Node):
         )
         while not self.map_saver_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().warn('Map saver server is not available, waiting...')
+
+        self.map_serializer_client = self.create_client(
+            SerializePoseGraph,
+            'slam_toolbox/serialize_map',
+            callback_group=client_callback_group,
+        )
 
         # Creating subscriber to dock status
         self.dock_status = None
@@ -100,7 +106,19 @@ class DataHarvester(Node):
         request.name.data = self.map_name.value
 
         future = self.map_saver_client.call_async(request)
-        self.executor.spin_until_future_complete(future)
+        time.sleep(5)
+        return future.result()
+
+    def serialize_map(self):
+        """
+        A function for making request to map serializer
+        :return: Result of request with serializer status
+        """
+        request = SerializePoseGraph.Request()
+        request.filename = self.map_name.value
+
+        future = self.map_serializer_client.call_async(request)
+        time.sleep(5)
         return future.result()
 
     def timer_workload_callback(self):
@@ -188,10 +206,20 @@ class DataHarvester(Node):
         runtime = future.result().result.runtime.sec
         self.get_logger().info('The data harvesting is complete, elapsed time: %d sec' % runtime)
         self.get_logger().info('Saving the map to workspace dir...')
+
         save_map_response = self.save_map()
         if save_map_response.result == 0:
-            self.get_logger().info('Map is successfully saved')
-        rclpy.shutdown()
+            self.get_logger().info('Map image is successfully saved')
+        elif save_map_response.result == 1:
+            self.get_logger().error('No map received')
+        else:
+            self.get_logger().error('Map saving is not completed')
+
+        serialize_map_response = self.serialize_map()
+        if serialize_map_response.result == 0:
+            self.get_logger().info('Map is successfully serialized')
+        else:
+            self.get_logger().error('Map serialization is not completed')
 
     def __enter__(self):
         """
