@@ -34,7 +34,9 @@ def generate_launch_description():
         PythonLaunchDescriptionSource([os.path.join(
             get_package_share_directory('turtlebot4_navigation'), 'launch'),
             '/slam.launch.py']),
-        launch_arguments={'params': config_slam}.items()
+        launch_arguments={
+            'params': config_slam,
+        }.items()
     )
 
     # Add node to launching

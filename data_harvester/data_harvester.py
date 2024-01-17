@@ -1,18 +1,25 @@
-import time
+# from os.path import dirname
+#
+# import time
+# from datetime import datetime
+#
+# import json
+
+from threading import Event
 
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+
+# from ament_index_python.packages import get_package_share_directory
 
 # Groups that cannot being executed in parallel to avoid deadlocks
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 from rclpy.executors import MultiThreadedExecutor
 
-from action_msgs.msg import GoalStatus
-
 from irobot_create_msgs.action import WallFollow, Undock
-from irobot_create_msgs.msg import DockStatus
+from irobot_create_msgs.msg import DockStatus, Mouse
 
 from slam_toolbox.srv import SaveMap, SerializePoseGraph
 
@@ -25,7 +32,7 @@ class DataHarvester(Node):
     """
 
     def __init__(self):
-        super().__init__("data_harvester") # node name
+        super().__init__("data_harvester")  # node name
 
         # Declare used parameters
         self.declare_parameters(
@@ -40,104 +47,174 @@ class DataHarvester(Node):
         self.runtime_min = self.get_parameter('runtime_min')
         self.map_name = self.get_parameter('map_name')
 
+        # # Opening file for saving odometry
+        # current_time = datetime.now()
+        # workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester')))))
+        # self.odom_file = open(workspace_dir + '/odom-' + current_time.strftime("%d-%m-%Y-%H-%M-%S") + '.json', 'w')
+
+        # Callback group to prevent actions executed in parallel
+        action_callback_group = MutuallyExclusiveCallbackGroup()
+
         # Creating client for wall follow action and wait for its availability
-        client_callback_group = MutuallyExclusiveCallbackGroup()
+        self.wall_follow_done_event = Event()
         self.wall_follow_client = ActionClient(
             self,
             WallFollow,
             'wall_follow',
-            callback_group=client_callback_group,
+            callback_group=action_callback_group,
         )
         while not self.wall_follow_client.wait_for_server(timeout_sec=1.0):
             self.get_logger().warn('Wall follow server is not available, waiting...')
 
         # Creating client for undock from charging station action and wait for its availability
+        self.undock_done_event = Event()
         self.undock_client = ActionClient(
             self,
             Undock,
             'undock',
-            callback_group=client_callback_group,
+            callback_group=action_callback_group,
         )
         while not self.undock_client.wait_for_server(timeout_sec=1.0):
             self.get_logger().warn('Undock server is not available, waiting...')
 
-        # Explicitly setting the goal status to be checked next
-        self.undock_client_status = GoalStatus.STATUS_EXECUTING
-
         # Creating clients for map saver service: first for pgm format, second for posegraph format
+        map_workload_callback_group = MutuallyExclusiveCallbackGroup()
+
+        self.map_saver_done_event = Event()
         self.map_saver_client = self.create_client(
             SaveMap,
             'slam_toolbox/save_map',
-            callback_group=client_callback_group,
+            callback_group=map_workload_callback_group,
         )
         while not self.map_saver_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().warn('Map saver server is not available, waiting...')
 
+        self.map_serializer_done_event = Event()
         self.map_serializer_client = self.create_client(
             SerializePoseGraph,
             'slam_toolbox/serialize_map',
-            callback_group=client_callback_group,
+            callback_group=map_workload_callback_group,
         )
 
         # Creating subscriber to dock status
         self.dock_status = None
-        workload_callback_group = MutuallyExclusiveCallbackGroup()
         self.subscriber_dock_status = self.create_subscription(
             DockStatus,
             'dock_status',
             self.subscriber_dock_status_callback,
             qos_profile_sensor_data,
-            callback_group=workload_callback_group,
         )
 
         # Timer for starting all workload
         self.timer_workload = self.create_timer(
             5,
             self.timer_workload_callback,
-            callback_group=workload_callback_group,
         )
 
-    def save_map(self):
-        """
-        A function for making request to map saver
-        :return: Result of request with map saving status
-        """
-        request = SaveMap.Request()
-        request.name.data = self.map_name.value
-
-        future = self.map_saver_client.call_async(request)
-        time.sleep(5)
-        return future.result()
-
-    def serialize_map(self):
-        """
-        A function for making request to map serializer
-        :return: Result of request with serializer status
-        """
-        request = SerializePoseGraph.Request()
-        request.filename = self.map_name.value
-
-        future = self.map_serializer_client.call_async(request)
-        time.sleep(5)
-        return future.result()
+        # # Creating subscriber to mouse sensor
+        # self.subscriber_mouse = self.create_subscription(
+        #     Mouse,
+        #     'mouse',
+        #     self.subscriber_mouse_callback,
+        #     qos_profile_sensor_data,
+        #     callback_group=subscriber_callback_group,
+        # )
 
     def timer_workload_callback(self):
         """
         Main workload timer callback after which the robot starts
         :return: None
         """
-        self.timer_workload.cancel() # timer is needed only once
+        self.timer_workload.cancel()  # timer is needed only once
 
         # Check if the robot is docked, if not - start undocking
         if self.dock_status is True:
             self.get_logger().info("The robot is docked, need to undock it first")
             self.send_goal_undock()
-            while self.undock_client_status != GoalStatus.STATUS_SUCCEEDED:
-                time.sleep(2)
+            self.undock_done_event.wait()
 
         # Making request to wall follow
         runtime_sec = int(self.runtime_min.value * 60)
         self.send_goal_wall_follow(WallFollow.Goal.FOLLOW_RIGHT, runtime_sec)
+        self.wall_follow_done_event.wait()
+
+        # Save map after finishing wall follow
+        self.get_logger().info('Saving and serializing the map to workspace dir...')
+        self.save_map()
+        self.map_saver_done_event.wait()
+        self.serialize_map()
+        self.map_serializer_done_event.wait()
+
+        self.get_logger().info("All done")
+
+    # def subscriber_mouse_callback(self, msg):
+    #     if self.wall_follow_client_status == GoalStatus.STATUS_SUCCEEDED:
+    #         self.odom_file.close()
+    #     timestamp = float(msg.header.stamp.sec + msg.header.stamp.nanosec * pow(10, -9))
+    #     integrated_x = float(msg.integrated_x)
+    #     integrated_y = float(msg.integrated_y)
+    #
+    #     mouse_dict = {'timestamp': timestamp,
+    #                   'integrated_x': integrated_x,
+    #                   'integrated_y': integrated_y,
+    #                   }
+    #
+    #     #json.dump(mouse_dict, self.odom_file, indent=4)
+
+    def save_map(self):
+        """
+        A function for making request to map saver
+        :return: None
+        """
+        # Preparing request
+        request = SaveMap.Request()
+        request.name.data = self.map_name.value
+
+        future = self.map_saver_client.call_async(request)
+        future.add_done_callback(self.map_saver_result)
+
+    def map_saver_result(self, future):
+        """
+        A function for processing response from map saver
+        :param future:
+        :return: None
+        """
+        response = future.result().result
+
+        if response == 0:
+            self.get_logger().info('Map image is successfully saved')
+        elif response == 1:
+            self.get_logger().error('No map received')
+        else:
+            self.get_logger().error('Map saving is not completed')
+
+        self.map_saver_done_event.set()
+
+    def serialize_map(self):
+        """
+        A function for making request to map serializer
+        :return: None
+        """
+        # Preparing request
+        request = SerializePoseGraph.Request()
+        request.filename = self.map_name.value
+
+        future = self.map_serializer_client.call_async(request)
+        future.add_done_callback(self.map_serializer_result)
+
+    def map_serializer_result(self, future):
+        """
+        A function for processing response from map serializer
+        :param future:
+        :return: None
+        """
+        response = future.result().result
+        if response == 0:
+            self.get_logger().info('Map is successfully serialized')
+        else:
+            self.get_logger().error('Map serialization is not completed')
+
+        self.map_serializer_done_event.set()
 
     def subscriber_dock_status_callback(self, msg):
         """
@@ -170,7 +247,7 @@ class DataHarvester(Node):
 
     def undock_result_callback(self, future):
         self.get_logger().info('Finished undocking task')
-        self.undock_client_status = GoalStatus.STATUS_SUCCEEDED
+        self.undock_done_event.set()
 
     def send_goal_wall_follow(self, follow_side, sec):
         """
@@ -205,21 +282,7 @@ class DataHarvester(Node):
     def wall_follow_result_callback(self, future):
         runtime = future.result().result.runtime.sec
         self.get_logger().info('The data harvesting is complete, elapsed time: %d sec' % runtime)
-        self.get_logger().info('Saving the map to workspace dir...')
-
-        save_map_response = self.save_map()
-        if save_map_response.result == 0:
-            self.get_logger().info('Map image is successfully saved')
-        elif save_map_response.result == 1:
-            self.get_logger().error('No map received')
-        else:
-            self.get_logger().error('Map saving is not completed')
-
-        serialize_map_response = self.serialize_map()
-        if serialize_map_response.result == 0:
-            self.get_logger().info('Map is successfully serialized')
-        else:
-            self.get_logger().error('Map serialization is not completed')
+        self.wall_follow_done_event.set()
 
     def __enter__(self):
         """
