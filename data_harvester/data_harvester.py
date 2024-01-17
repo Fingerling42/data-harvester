@@ -1,9 +1,9 @@
-# from os.path import dirname
-#
-# import time
-# from datetime import datetime
-#
-# import json
+from os.path import dirname
+
+import time
+from datetime import datetime
+
+import json
 
 from threading import Event
 
@@ -11,7 +11,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 
-# from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_share_directory
 
 # Groups that cannot being executed in parallel to avoid deadlocks
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
@@ -47,10 +47,10 @@ class DataHarvester(Node):
         self.runtime_min = self.get_parameter('runtime_min')
         self.map_name = self.get_parameter('map_name')
 
-        # # Opening file for saving odometry
-        # current_time = datetime.now()
-        # workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester')))))
-        # self.odom_file = open(workspace_dir + '/odom-' + current_time.strftime("%d-%m-%Y-%H-%M-%S") + '.json', 'w')
+        # Opening file with datatime name for saving odometry
+        current_time = datetime.now()
+        workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester')))))
+        self.odom_file = open(workspace_dir + '/odom-' + current_time.strftime("%d-%m-%Y-%H-%M-%S") + '.json', 'w')
 
         # Callback group to prevent actions executed in parallel
         action_callback_group = MutuallyExclusiveCallbackGroup()
@@ -111,14 +111,13 @@ class DataHarvester(Node):
             self.timer_workload_callback,
         )
 
-        # # Creating subscriber to mouse sensor
-        # self.subscriber_mouse = self.create_subscription(
-        #     Mouse,
-        #     'mouse',
-        #     self.subscriber_mouse_callback,
-        #     qos_profile_sensor_data,
-        #     callback_group=subscriber_callback_group,
-        # )
+        # Creating subscriber to mouse sensor
+        self.subscriber_mouse = self.create_subscription(
+            Mouse,
+            'mouse',
+            self.subscriber_mouse_callback,
+            qos_profile_sensor_data,
+        )
 
     def timer_workload_callback(self):
         """
@@ -145,21 +144,22 @@ class DataHarvester(Node):
         self.serialize_map()
         self.map_serializer_done_event.wait()
 
+        self.odom_file.close()
+
         self.get_logger().info("All done")
 
-    # def subscriber_mouse_callback(self, msg):
-    #     if self.wall_follow_client_status == GoalStatus.STATUS_SUCCEEDED:
-    #         self.odom_file.close()
-    #     timestamp = float(msg.header.stamp.sec + msg.header.stamp.nanosec * pow(10, -9))
-    #     integrated_x = float(msg.integrated_x)
-    #     integrated_y = float(msg.integrated_y)
-    #
-    #     mouse_dict = {'timestamp': timestamp,
-    #                   'integrated_x': integrated_x,
-    #                   'integrated_y': integrated_y,
-    #                   }
-    #
-    #     #json.dump(mouse_dict, self.odom_file, indent=4)
+    def subscriber_mouse_callback(self, msg):
+        if self.wall_follow_done_event.is_set() is not True:
+            timestamp = float(msg.header.stamp.sec + msg.header.stamp.nanosec * pow(10, -9))
+            integrated_x = float(msg.integrated_x)
+            integrated_y = float(msg.integrated_y)
+
+            mouse_dict = {'timestamp': timestamp,
+                          'integrated_x': integrated_x,
+                          'integrated_y': integrated_y,
+                          }
+
+            json.dump(mouse_dict, self.odom_file, indent=4)
 
     def save_map(self):
         """
