@@ -12,17 +12,20 @@ from message_filters import ApproximateTimeSynchronizer, Subscriber
 from ament_index_python.packages import get_package_share_directory
 
 # Groups that cannot being executed in parallel to avoid deadlocks
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 
 from rclpy.executors import MultiThreadedExecutor
 
 from irobot_create_msgs.action import WallFollow, Undock
 from irobot_create_msgs.msg import DockStatus, Mouse, IrIntensityVector
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, Image
 
 from slam_toolbox.srv import SaveMap, SerializePoseGraph
 
 from rclpy.qos import qos_profile_sensor_data
+
+from cv_bridge import CvBridge
+import cv2
 
 
 class DataHarvester(Node):
@@ -51,8 +54,13 @@ class DataHarvester(Node):
         workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester')))))
         self.odom_file = open(workspace_dir + '/odom-' + current_time.strftime("%d-%m-%Y-%H-%M-%S") + '.json', 'w')
 
+        # Preparing OpenCV for video recording
+        self.opencv_bridge = CvBridge()
+        self.video_writer = None
+
         # Callback group to prevent actions executed in parallel
         action_callback_group = MutuallyExclusiveCallbackGroup()
+        workload_callback_group = ReentrantCallbackGroup()
 
         # Creating client for wall follow action and wait for its availability
         self.wall_follow_done_event = Event()
@@ -108,30 +116,28 @@ class DataHarvester(Node):
         self.timer_workload = self.create_timer(
             5,
             self.timer_workload_callback,
+            callback_group=workload_callback_group,
         )
 
-        # Creating subscribers to odom sensors
+        # Creating subscribers to all odom sensors
         self.subscriber_mouse = Subscriber(
             self,
             Mouse,
             'mouse',
             qos_profile=qos_profile_sensor_data,
         )
-
         self.subscriber_imu = Subscriber(
             self,
             Imu,
             'imu',
             qos_profile=qos_profile_sensor_data,
         )
-
         self.subscriber_cliff = Subscriber(
             self,
             IrIntensityVector,
             'cliff_intensity',
             qos_profile=qos_profile_sensor_data,
         )
-
         self.subscriber_ir_bumper = Subscriber(
             self,
             IrIntensityVector,
@@ -139,6 +145,7 @@ class DataHarvester(Node):
             qos_profile=qos_profile_sensor_data,
         )
 
+        # Creating a time synchronizer to collect sensors data on the same timestamp
         queue_size = 30
         self.odom_topics_synchronizer = ApproximateTimeSynchronizer(
             [self.subscriber_mouse, self.subscriber_imu, self.subscriber_cliff, self.subscriber_ir_bumper],
@@ -146,6 +153,15 @@ class DataHarvester(Node):
             0.01,
         )
         self.odom_topics_synchronizer.registerCallback(self.record_odom)
+
+        # Creating subscriber to image topic
+        self.subscriber_video = self.create_subscription(
+            Image,
+            'oakd/rgb/preview/image_raw',
+            self.subscriber_video_callback,
+            qos_profile_sensor_data,
+            callback_group=workload_callback_group,
+        )
 
     def timer_workload_callback(self):
         """
@@ -174,11 +190,54 @@ class DataHarvester(Node):
 
         self.get_logger().info('Saving odometry to JSON file in workspace dir...')
         self.odom_file.close()
+        self.video_writer.release()
 
         self.get_logger().info('All done')
 
-    def record_odom(self, mouse_msg, imu_msg, cliff_msg, bumper_ir_msg):
+    def subscriber_video_callback(self, msg):
+        """
+        Callback from oakd image topic that starts recording video
+        :param msg: Image from topic
+        :return: None
+        """
         if self.wall_follow_done_event.is_set() is not True:
+            # Convert Image object to OpenCV.Mat object
+            cv_image = self.opencv_bridge.imgmsg_to_cv2(msg)
+
+            # Check if video_writer is needed to be initialized
+            if self.video_writer is None:
+                self.init_video_writer(msg)
+
+            self.video_writer.write(cv_image)
+
+    def init_video_writer(self, msg):
+        """
+        A function for initialization of video writer
+        :param msg: Image from topic
+        :return: None
+        """
+        video_format = 'mp4'
+        size = (msg.width, msg.height)
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')
+        filename = 'harvested_video.' + video_format
+        self.video_writer = cv2.VideoWriter(
+            filename,
+            fourcc=fourcc,
+            fps=30,
+            frameSize=size
+        )
+
+    def record_odom(self, mouse_msg, imu_msg, cliff_msg, bumper_ir_msg):
+        """
+        A callback function that write all odom messages to JSON file
+        :param mouse_msg: mouse sensor msg
+        :param imu_msg: IMU msg
+        :param cliff_msg: IR cliff sensor msg
+        :param bumper_ir_msg: IR sensor on bumper msg
+        :return: None
+        """
+        if self.wall_follow_done_event.is_set() is not True:
+            # Getting all values of sensors readings
             timestamp = float(mouse_msg.header.stamp.sec + mouse_msg.header.stamp.nanosec * pow(10, -9))
 
             # Mouse sensor
@@ -212,6 +271,7 @@ class DataHarvester(Node):
             bumper_front_right_intensity = int(bumper_ir_msg.readings[5].value)
             bumper_right_intensity = int(bumper_ir_msg.readings[6].value)
 
+            # Constructing dictionary for JSON dumping
             sensor_dict = {'timestamp': timestamp,
                            'mouse_sensor': {
                                'integrated_x': mouse_integrated_x,
