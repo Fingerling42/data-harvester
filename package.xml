@@ -7,6 +7,12 @@
   <maintainer email="berman@robonomics.network">Ivan Berman</maintainer>
   <license>Apache-2.0</license>
 
+  <depend>rclpy</depend>
+  <depend>irobot_create_msgs</depend>
+  <depend>message_filters</depend>
+  <depend>sensor_msgs</depend>
+  <depend>slam_toolbox</depend>
+
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>

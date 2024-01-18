@@ -1,8 +1,6 @@
 from os.path import dirname
 from datetime import datetime
-
 import json
-
 from threading import Event
 
 import rclpy
