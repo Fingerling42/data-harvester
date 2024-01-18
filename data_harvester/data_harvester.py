@@ -49,10 +49,14 @@ class DataHarvester(Node):
         self.runtime_min = self.get_parameter('runtime_min')
         self.map_name = self.get_parameter('map_name')
 
-        # Opening file with datatime name for saving odometry
+        # Preparing files for opening
         current_time = datetime.now()
-        workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester')))))
-        self.odom_file = open(workspace_dir + '/odom-' + current_time.strftime("%d-%m-%Y-%H-%M-%S") + '.json', 'w')
+        video_format = 'mp4'
+        self.workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester')))))
+        self.archive_file = (self.workspace_dir + '/harvested-data-' + current_time.strftime("%d-%m-%Y-%H-%M-%S")
+                             + '.zip')
+        self.video_file = self.workspace_dir + '/harvesting_process.' + video_format
+        self.odom_file = open(self.workspace_dir + '/odom' + '.json', 'w')
 
         # Preparing OpenCV for video recording
         self.opencv_bridge = CvBridge()
@@ -218,12 +222,10 @@ class DataHarvester(Node):
         :param msg: Image from topic
         :return: None
         """
-        video_format = 'mp4'
         size = (msg.width, msg.height)
         fourcc = cv2.VideoWriter_fourcc(*'avc1')
-        filename = 'harvested_video.' + video_format
         self.video_writer = cv2.VideoWriter(
-            filename,
+            self.video_file,
             fourcc=fourcc,
             fps=30,
             frameSize=size
