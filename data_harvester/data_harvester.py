@@ -188,8 +188,9 @@ class DataHarvester(Node):
         self.serialize_map()
         self.map_serializer_done_event.wait()
 
-        self.get_logger().info('Saving odometry to JSON file in workspace dir...')
+        self.get_logger().info('Saving odometry to JSON file to workspace dir...')
         self.odom_file.close()
+        self.get_logger().info('Saving video to .mp4 file to workspace dir...')
         self.video_writer.release()
 
         self.get_logger().info('All done')
@@ -201,6 +202,7 @@ class DataHarvester(Node):
         :return: None
         """
         if self.wall_follow_done_event.is_set() is not True:
+            self.get_logger().info('Starting video recording...', once=True)
             # Convert Image object to OpenCV.Mat object
             cv_image = self.opencv_bridge.imgmsg_to_cv2(msg)
 
@@ -237,6 +239,7 @@ class DataHarvester(Node):
         :return: None
         """
         if self.wall_follow_done_event.is_set() is not True:
+            self.get_logger().info('Starting collecting odometry...', once=True)
             # Getting all values of sensors readings
             timestamp = float(mouse_msg.header.stamp.sec + mouse_msg.header.stamp.nanosec * pow(10, -9))
 
