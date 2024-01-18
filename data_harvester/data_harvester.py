@@ -1,6 +1,4 @@
 from os.path import dirname
-
-import time
 from datetime import datetime
 
 import json
@@ -343,6 +341,7 @@ class DataHarvester(Node):
         get_result_future.add_done_callback(self.undock_result_callback)
 
     def undock_result_callback(self, future):
+        future
         self.get_logger().info('Finished undocking task')
         self.undock_done_event.set()
 
@@ -409,12 +408,7 @@ def main(args=None):
             executor.spin()
         except KeyboardInterrupt:
             data_harvester.get_logger().warn("Killing the data harvester node...")
-
-    # Destroy the node explicitly
-    # (optional - otherwise it will be done automatically
-    # when the garbage collector destroys the node object)
-    data_harvester.destroy_node()
-    rclpy.shutdown()
+            executor.remove_node(data_harvester)
 
 
 if __name__ == '__main__':
