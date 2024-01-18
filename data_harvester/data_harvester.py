@@ -6,23 +6,26 @@ from threading import Event
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+from rclpy.serialization import serialize_message
 
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 
 from ament_index_python.packages import get_package_share_directory
 
 # Groups that cannot being executed in parallel to avoid deadlocks
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 
 from rclpy.executors import MultiThreadedExecutor
 
 from irobot_create_msgs.action import WallFollow, Undock
 from irobot_create_msgs.msg import DockStatus, Mouse, IrIntensityVector
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, Image
 
 from slam_toolbox.srv import SaveMap, SerializePoseGraph
 
 from rclpy.qos import qos_profile_sensor_data
+
+import rosbag2_py
 
 
 class DataHarvester(Node):
@@ -51,8 +54,23 @@ class DataHarvester(Node):
         workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester')))))
         self.odom_file = open(workspace_dir + '/odom-' + current_time.strftime("%d-%m-%Y-%H-%M-%S") + '.json', 'w')
 
+        # Creating rosbag writer, which will save bag fiel to directory (uri) in workspace
+        self.rosbag_video_writer = rosbag2_py.SequentialWriter()
+        storage_options = rosbag2_py._storage.StorageOptions(
+            uri='harvested_video_bag',
+            storage_id='sqlite3')
+        converter_options = rosbag2_py._storage.ConverterOptions('', '')
+        self.rosbag_video_writer.open(storage_options, converter_options)
+
+        video_topic_info = rosbag2_py._storage.TopicMetadata(
+            name='oakd/rgb/preview/image_raw',
+            type='sensor_msgs/msg/Image',
+            serialization_format='cdr')
+        self.rosbag_video_writer.create_topic(video_topic_info)
+
         # Callback group to prevent actions executed in parallel
         action_callback_group = MutuallyExclusiveCallbackGroup()
+        workload_callback_group = ReentrantCallbackGroup()
 
         # Creating client for wall follow action and wait for its availability
         self.wall_follow_done_event = Event()
@@ -108,6 +126,7 @@ class DataHarvester(Node):
         self.timer_workload = self.create_timer(
             5,
             self.timer_workload_callback,
+            callback_group=workload_callback_group,
         )
 
         # Creating subscribers to odom sensors
@@ -117,21 +136,18 @@ class DataHarvester(Node):
             'mouse',
             qos_profile=qos_profile_sensor_data,
         )
-
         self.subscriber_imu = Subscriber(
             self,
             Imu,
             'imu',
             qos_profile=qos_profile_sensor_data,
         )
-
         self.subscriber_cliff = Subscriber(
             self,
             IrIntensityVector,
             'cliff_intensity',
             qos_profile=qos_profile_sensor_data,
         )
-
         self.subscriber_ir_bumper = Subscriber(
             self,
             IrIntensityVector,
@@ -139,6 +155,7 @@ class DataHarvester(Node):
             qos_profile=qos_profile_sensor_data,
         )
 
+        # Creating a time synchronizer to collect sensors data on the same timestamp
         queue_size = 30
         self.odom_topics_synchronizer = ApproximateTimeSynchronizer(
             [self.subscriber_mouse, self.subscriber_imu, self.subscriber_cliff, self.subscriber_ir_bumper],
@@ -146,6 +163,15 @@ class DataHarvester(Node):
             0.01,
         )
         self.odom_topics_synchronizer.registerCallback(self.record_odom)
+
+        # Creating subscriber to image topic
+        self.subscriber_video = self.create_subscription(
+            Image,
+            'oakd/rgb/preview/image_raw',
+            self.subscriber_video_callback,
+            qos_profile_sensor_data,
+            callback_group=workload_callback_group,
+        )
 
     def timer_workload_callback(self):
         """
@@ -176,6 +202,13 @@ class DataHarvester(Node):
         self.odom_file.close()
 
         self.get_logger().info('All done')
+
+    def subscriber_video_callback(self, msg):
+        self.rosbag_video_writer.write(
+            'oakd/rgb/preview/image_raw',
+            serialize_message(msg),
+            self.get_clock().now().nanoseconds
+        )
 
     def record_odom(self, mouse_msg, imu_msg, cliff_msg, bumper_ir_msg):
         if self.wall_follow_done_event.is_set() is not True:
