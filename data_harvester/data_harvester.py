@@ -22,6 +22,7 @@ from rclpy.executors import MultiThreadedExecutor
 from irobot_create_msgs.action import WallFollow, Undock
 from irobot_create_msgs.msg import DockStatus, Mouse, IrIntensityVector
 from sensor_msgs.msg import Imu, Image
+from geometry_msgs.msg import PoseWithCovarianceStamped
 
 from slam_toolbox.srv import SaveMap, SerializePoseGraph
 
@@ -154,11 +155,23 @@ class DataHarvester(Node):
             'ir_intensity',
             qos_profile=qos_profile_sensor_data,
         )
+        self.subscriber_slam_pose = Subscriber(
+            self,
+            PoseWithCovarianceStamped,
+            'pose',
+            qos_profile=qos_profile_sensor_data,
+        )
 
         # Creating a time synchronizer to collect sensors data on the same timestamp
         queue_size = 30
         self.odom_topics_synchronizer = ApproximateTimeSynchronizer(
-            [self.subscriber_mouse, self.subscriber_imu, self.subscriber_cliff, self.subscriber_ir_bumper],
+            [
+                self.subscriber_mouse,
+                self.subscriber_imu,
+                self.subscriber_cliff,
+                self.subscriber_ir_bumper,
+                self.subscriber_slam_pose
+            ],
             queue_size,
             0.01,
         )
@@ -200,6 +213,7 @@ class DataHarvester(Node):
         self.odom_file.close()
         self.video_writer.release()
 
+        # Create resulting archive with harvested data
         with ZipFile(self.archive_path, 'w') as zip_file:
             self.get_logger().info('Saving zip archive with harvested data to workspace dir...')
 
@@ -233,31 +247,27 @@ class DataHarvester(Node):
             except FileNotFoundError:
                 self.get_logger().error('Map database has not been harvested')
 
+        # Garbage removal routine
         try:
             os.remove(self.video_path)
         except FileNotFoundError:
             pass
-
         try:
             os.remove(self.odom_path)
         except FileNotFoundError:
             pass
-
         try:
             os.remove(self.map_path + '.pgm')
         except FileNotFoundError:
             pass
-
         try:
             os.remove(self.map_path + '.yaml')
         except FileNotFoundError:
             pass
-
         try:
             os.remove(self.map_path + '.posegraph')
         except FileNotFoundError:
             pass
-
         try:
             os.remove(self.map_path + '.data')
         except FileNotFoundError:
@@ -297,7 +307,7 @@ class DataHarvester(Node):
             frameSize=size
         )
 
-    def record_odom(self, mouse_msg, imu_msg, cliff_msg, bumper_ir_msg):
+    def record_odom(self, mouse_msg, imu_msg, cliff_msg, bumper_ir_msg, pose_msg):
         """
         A callback function that write all odom messages to JSON file
         :param mouse_msg: mouse sensor msg
@@ -310,6 +320,15 @@ class DataHarvester(Node):
             self.get_logger().info('Starting collecting odometry...', once=True)
             # Getting all values of sensors readings
             timestamp = float(mouse_msg.header.stamp.sec + mouse_msg.header.stamp.nanosec * pow(10, -9))
+
+            # Pose from SLAM
+            robot_position_x = float(pose_msg.pose.pose.position.x)
+            robot_position_y = float(pose_msg.pose.pose.position.y)
+            robot_position_z = float(pose_msg.pose.pose.position.z)
+            robot_orientation_x = float(pose_msg.pose.pose.orientation.x)
+            robot_orientation_y = float(pose_msg.pose.pose.orientation.y)
+            robot_orientation_z = float(pose_msg.pose.pose.orientation.z)
+            robot_orientation_w = float(pose_msg.pose.pose.orientation.w)
 
             # Mouse sensor
             mouse_integrated_x = float(mouse_msg.integrated_x)
@@ -344,6 +363,19 @@ class DataHarvester(Node):
 
             # Constructing dictionary for JSON dumping
             sensor_dict = {'timestamp': timestamp,
+                           'slam_pose': {
+                               'robot_position': {
+                                   'x': robot_position_x,
+                                   'y': robot_position_y,
+                                   'z': robot_position_z,
+                               },
+                               'robot_orientation': {
+                                   'x': robot_orientation_x,
+                                   'y': robot_orientation_y,
+                                   'z': robot_orientation_z,
+                                   'w': robot_orientation_w,
+                               },
+                           },
                            'mouse_sensor': {
                                'integrated_x': mouse_integrated_x,
                                'integrated_y': mouse_integrated_y,
