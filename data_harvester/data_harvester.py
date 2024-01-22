@@ -1,7 +1,10 @@
+import os
 from os.path import dirname
 from datetime import datetime
 import json
 from threading import Event
+
+from zipfile import ZipFile
 
 import rclpy
 from rclpy.node import Node
@@ -51,12 +54,15 @@ class DataHarvester(Node):
 
         # Preparing files for opening
         current_time = datetime.now()
-        video_format = 'mp4'
-        self.workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester')))))
-        self.archive_file = (self.workspace_dir + '/harvested-data-' + current_time.strftime("%d-%m-%Y-%H-%M-%S")
+        self.video_name = 'harvesting_process.mp4'
+        self.odom_name = 'odom.json'
+        workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester')))))
+        self.archive_path = (workspace_dir + '/harvested-data-' + current_time.strftime("%d-%m-%Y-%H-%M-%S")
                              + '.zip')
-        self.video_file = self.workspace_dir + '/harvesting_process.' + video_format
-        self.odom_file = open(self.workspace_dir + '/odom' + '.json', 'w')
+        self.video_path = workspace_dir + '/' + self.video_name
+        self.odom_path = workspace_dir + '/' + self.odom_name
+        self.map_path = workspace_dir + '/' + self.map_name.value
+        self.odom_file = open(self.odom_path, 'w')
 
         # Preparing OpenCV for video recording
         self.opencv_bridge = CvBridge()
@@ -186,16 +192,76 @@ class DataHarvester(Node):
         self.wall_follow_done_event.wait()
 
         # Save map after finishing wall follow
-        self.get_logger().info('Saving and serializing the map to workspace dir...')
         self.save_map()
         self.map_saver_done_event.wait()
         self.serialize_map()
         self.map_serializer_done_event.wait()
 
-        self.get_logger().info('Saving odometry to JSON file to workspace dir...')
         self.odom_file.close()
-        self.get_logger().info('Saving video to .mp4 file to workspace dir...')
         self.video_writer.release()
+
+        with ZipFile(self.archive_path, 'w') as zip_file:
+            self.get_logger().info('Saving zip archive with harvested data to workspace dir...')
+
+            try:
+                zip_file.write(self.video_name)
+            except FileNotFoundError:
+                self.get_logger().error('Video has not been harvested')
+
+            try:
+                zip_file.write(self.odom_name)
+            except FileNotFoundError:
+                self.get_logger().error('Odometry has not been harvested')
+
+            try:
+                zip_file.write(self.map_name.value + '.pgm')
+            except FileNotFoundError:
+                self.get_logger().error('Map image has not been harvested')
+
+            try:
+                zip_file.write(self.map_name.value + '.yaml')
+            except FileNotFoundError:
+                self.get_logger().error('Map config has not been harvested')
+
+            try:
+                zip_file.write(self.map_name.value + '.posegraph')
+            except FileNotFoundError:
+                self.get_logger().error('Map posegraph has not been harvested')
+
+            try:
+                zip_file.write(self.map_name.value + '.data')
+            except FileNotFoundError:
+                self.get_logger().error('Map database has not been harvested')
+
+        try:
+            os.remove(self.video_path)
+        except FileNotFoundError:
+            pass
+
+        try:
+            os.remove(self.odom_path)
+        except FileNotFoundError:
+            pass
+
+        try:
+            os.remove(self.map_path + '.pgm')
+        except FileNotFoundError:
+            pass
+
+        try:
+            os.remove(self.map_path + '.yaml')
+        except FileNotFoundError:
+            pass
+
+        try:
+            os.remove(self.map_path + '.posegraph')
+        except FileNotFoundError:
+            pass
+
+        try:
+            os.remove(self.map_path + '.data')
+        except FileNotFoundError:
+            pass
 
         self.get_logger().info('All done')
 
@@ -225,7 +291,7 @@ class DataHarvester(Node):
         size = (msg.width, msg.height)
         fourcc = cv2.VideoWriter_fourcc(*'avc1')
         self.video_writer = cv2.VideoWriter(
-            self.video_file,
+            self.video_path,
             fourcc=fourcc,
             fps=30,
             frameSize=size
@@ -326,7 +392,7 @@ class DataHarvester(Node):
         """
         # Preparing request
         request = SaveMap.Request()
-        request.name.data = self.map_name.value
+        request.name.data = self.map_path
 
         future = self.map_saver_client.call_async(request)
         future.add_done_callback(self.map_saver_result)
@@ -355,7 +421,7 @@ class DataHarvester(Node):
         """
         # Preparing request
         request = SerializePoseGraph.Request()
-        request.filename = self.map_name.value
+        request.filename = self.map_path
 
         future = self.map_serializer_client.call_async(request)
         future.add_done_callback(self.map_serializer_result)
