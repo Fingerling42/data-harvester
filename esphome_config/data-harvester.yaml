@@ -1,0 +1,49 @@
+esphome:
+  name: data-harvester
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+  level: DEBUG
+  logs:
+    bh1750.sensor: NONE
+    sht3xd: NONE
+    scd4x: NONE
+
+i2c:
+  sda: 18
+  scl: 19
+  scan: true
+  id: bus_a
+
+sensor:  
+  - platform: scd4x
+    co2:
+      name: "scd4x_co2"
+      id: scd4x_co2
+      on_value:
+        then:
+          logger.log:
+            format: "co2_sensor: %.1f"
+            args: [ 'id(scd4x_co2).state']
+    measurement_mode: low_power_periodic
+    update_interval: 30s
+
+  - platform: bh1750
+    name: "bh1750_lux"
+    id: bh1750_lux
+    address: 0x23
+    update_interval: 30s
+    
+  - platform: sht3xd
+    temperature:
+      name: "sht3xd_temp"
+      id: sht3xd_temp
+    humidity:
+      name: "sht3xd_humi"
+      id: sht3xd_hum
+    update_interval: 30s
