@@ -12,21 +12,21 @@ def generate_launch_description():
     ld = LaunchDescription()
 
     config_harvester = os.path.join(
-        get_package_share_directory('data_harvester'),
+        get_package_share_directory('data_harvester_main'),
         'config',
         'harvester_config.yaml'
     )
 
     config_slam = os.path.join(
-        get_package_share_directory('data_harvester'),
+        get_package_share_directory('data_harvester_main'),
         'config',
         'turtlebot4_slam.yaml'
     )
 
     # Creating node for sender with params from config
-    data_harvester = Node(
-        package='data_harvester',
-        executable='data_harvester',
+    data_harvester_main = Node(
+        package='data_harvester_main',
+        executable='data_harvester_main',
         parameters=[config_harvester],
     )
 
@@ -41,5 +41,5 @@ def generate_launch_description():
 
     # Add node to launching
     ld.add_action(turtlebot4_slam)
-    ld.add_action(data_harvester)
+    ld.add_action(data_harvester_main)
     return ld

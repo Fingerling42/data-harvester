@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 import os
 from glob import glob
 
-package_name = 'data_harvester'
+package_name = 'data_harvester_main'
 
 setup(
     name=package_name,
@@ -24,7 +24,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'data_harvester = data_harvester.data_harvester:main',
+            'data_harvester_main = data_harvester_main.data_harvester_main:main',
         ],
     },
 )

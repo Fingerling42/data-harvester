@@ -32,13 +32,13 @@ from cv_bridge import CvBridge
 import cv2
 
 
-class DataHarvester(Node):
+class DataHarvesterMain(Node):
     """
     A class for handle all necessary function of Turtlebot 4 ROS 2 stack: creating clients, make action requests
     """
 
     def __init__(self):
-        super().__init__("data_harvester")  # node name
+        super().__init__("data_harvester_main")  # node name
 
         # Declare used parameters
         self.declare_parameters(
@@ -57,7 +57,7 @@ class DataHarvester(Node):
         current_time = datetime.now()
         self.video_name = 'harvesting_process.mp4'
         self.odom_name = 'odom.json'
-        workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester')))))
+        workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester_main')))))
         self.archive_path = (workspace_dir + '/harvested-data-' + current_time.strftime("%d-%m-%Y-%H-%M-%S")
                              + '.zip')
         self.video_path = workspace_dir + '/' + self.video_name
@@ -314,6 +314,7 @@ class DataHarvester(Node):
         :param imu_msg: IMU msg
         :param cliff_msg: IR cliff sensor msg
         :param bumper_ir_msg: IR sensor on bumper msg
+        :param pose_msg: Position and orientation from SLAM
         :return: None
         """
         if self.wall_follow_done_event.is_set() is not True:
@@ -563,13 +564,13 @@ def main(args=None):
 
     executor = MultiThreadedExecutor()
 
-    with DataHarvester() as data_harvester:
+    with DataHarvesterMain() as data_harvester_main:
         try:
-            executor.add_node(data_harvester)
+            executor.add_node(data_harvester_main)
             executor.spin()
         except KeyboardInterrupt:
-            data_harvester.get_logger().warn("Killing the data harvester node...")
-            executor.remove_node(data_harvester)
+            data_harvester_main.get_logger().warn("Killing the data harvester node...")
+            executor.remove_node(data_harvester_main)
 
 
 if __name__ == '__main__':
