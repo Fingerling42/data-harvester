@@ -9,6 +9,7 @@
 // Include header files of sensors
 #include "sht3x.h"
 #include "bh1750.h"
+#include "scd4x.h"
 
 // Tag of executable for logging
 static const char *TAG = "harvester_sensors";
@@ -16,6 +17,7 @@ static const char *TAG = "harvester_sensors";
 // Devices descriptors
 static sht3x_t sht3x_dev;
 static i2c_dev_t bh1750_dev;
+// static i2c_dev_t scd4x_dev = { 0 };
 
 // I2C pin numbers
 #define I2C_MASTER_SCL_IO           19     // GPIO number used for I2C master clock
@@ -42,8 +44,6 @@ void app_main(void)
     ESP_ERROR_CHECK(sht3x_init_desc(&sht3x_dev, SHT3X_ADDR, I2C_MASTER_BUS, I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO));
     ESP_ERROR_CHECK(sht3x_init(&sht3x_dev));
 
-    ESP_LOGI(TAG, "Sensors initialized successfully");
-
     // Initialize BH1750 sensor
     uint16_t lux;
 
@@ -52,11 +52,31 @@ void app_main(void)
     ESP_ERROR_CHECK(bh1750_init_desc(&bh1750_dev, BH1750_ADDR, I2C_MASTER_BUS, I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO));
     ESP_ERROR_CHECK(bh1750_setup(&bh1750_dev, BH1750_MODE_CONTINUOUS, BH1750_RES_HIGH));
 
+    // Initialize SCD4x sensor
+    uint16_t co2;
+    float temp_scd4x, humi_scd4x;
+    i2c_dev_t scd4x_dev = { 0 };
+
+    ESP_ERROR_CHECK(scd4x_init_desc(&scd4x_dev, I2C_MASTER_BUS, I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO));
+    scd4x_wake_up(&scd4x_dev);
+    ESP_ERROR_CHECK(scd4x_stop_periodic_measurement(&scd4x_dev));
+    ESP_ERROR_CHECK(scd4x_reinit(&scd4x_dev));
+
+    uint16_t serial[3];
+    ESP_ERROR_CHECK(scd4x_get_serial_number(&scd4x_dev, serial, serial + 1, serial + 2));
+    ESP_LOGI(TAG, "SCD4x serial number: 0x%04x%04x%04x", serial[0], serial[1], serial[2]);
+
+    ESP_ERROR_CHECK(scd4x_start_periodic_measurement(&scd4x_dev));
+
+    ESP_LOGI(TAG, "Sensors initialized successfully");
+
     TickType_t last_wakeup = xTaskGetTickCount();
 
     // Main loop
     while(true)
     {
+    	vTaskDelay(pdMS_TO_TICKS(5000));
+
         // Perform one measurement of SHT3x sensor
         ESP_ERROR_CHECK(sht3x_measure(&sht3x_dev, &temperature, &humidity));
         printf("sht3x_temp: %.4f\n", temperature);
@@ -68,7 +88,14 @@ void app_main(void)
         else
             printf("bh1750_lux: %d\n", lux);
 
+        // Perform one measurement of SCD4x sensor
+        if (scd4x_read_measurement(&scd4x_dev, &co2, &temp_scd4x, &humi_scd4x) != ESP_OK)
+        	printf("Could not read SCD4x sensor data\n");
+        else
+        	printf("scd4x_co2: %u\n", co2);
+
         // Wait until 5 seconds are over
         vTaskDelayUntil(&last_wakeup, pdMS_TO_TICKS(5000));
+
     }
 }
