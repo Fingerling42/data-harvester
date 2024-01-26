@@ -1,54 +1,57 @@
 #include <stdio.h>
 #include <inttypes.h>
+#include <string.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/i2c.h"
 #include "esp_log.h"
 
+// Include header files of sensors
 #include "sht3x.h"
 
+// Tag of executable for logging
 static const char *TAG = "harvester_sensors";
 
-#define I2C_MASTER_SCL_IO           19      					/*!< GPIO number used for I2C master clock */
-#define I2C_MASTER_SDA_IO           18      				   	/*!< GPIO number used for I2C master data  */
-#define I2C_MASTER_BUS              0                          	/*!< I2C master i2c port number, the number of i2c peripheral interfaces available will depend on the chip */
-#define I2C_MASTER_FREQ_HZ          400000                     	/*!< I2C master clock frequency */
-#define I2C_MASTER_TX_BUF_DISABLE   0                          	/*!< I2C master doesn't need buffer */
-#define I2C_MASTER_RX_BUF_DISABLE   0                          	/*!< I2C master doesn't need buffer */
-#define I2C_MASTER_TIMEOUT_MS       1000
+// Devices descriptors
+static sht3x_t sht3x_dev;
 
-/**
- * i2c initialization
- */
-static esp_err_t i2c_init(void)
-{
-    int i2c_master_port = I2C_MASTER_BUS;
+// I2C pin numbers
+#define I2C_MASTER_SCL_IO           19     // GPIO number used for I2C master clock
+#define I2C_MASTER_SDA_IO           18     // GPIO number used for I2C master data
+#define I2C_MASTER_BUS              0      // I2C master i2c port number
 
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = I2C_MASTER_SDA_IO,
-        .scl_io_num = I2C_MASTER_SCL_IO,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = I2C_MASTER_FREQ_HZ,
-    };
+// Devices address
+#define SHT3X_ADDR					0x44
 
-    i2c_param_config(i2c_master_port, &conf);
-
-    return i2c_driver_install(i2c_master_port, conf.mode, I2C_MASTER_RX_BUF_DISABLE, I2C_MASTER_TX_BUF_DISABLE, 0);
-}
 
 void app_main(void)
 {
-    ESP_ERROR_CHECK(i2c_init());
+	// Initialize I2C
+	ESP_ERROR_CHECK(i2cdev_init());
     ESP_LOGI(TAG, "I2C initialized successfully");
 
-    /**
-     * main loop
-     */
-    while(1)
+    // Initialize SHT3x sensor
+    float temperature;
+    float humidity;
+
+    memset(&sht3x_dev, 0, sizeof(sht3x_t));
+
+    ESP_ERROR_CHECK(sht3x_init_desc(&sht3x_dev, SHT3X_ADDR, I2C_MASTER_BUS, I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO));
+    ESP_ERROR_CHECK(sht3x_init(&sht3x_dev));
+
+    ESP_LOGI(TAG, "Sensors initialized successfully");
+
+    TickType_t last_wakeup = xTaskGetTickCount();
+
+    // Main loop
+    while(true)
     {
-    	ESP_LOGI(TAG, "Continue working...");
-    	vTaskDelay(1000 / portTICK_PERIOD_MS);
+        // Perform one measurement of SHT3x sensor
+        ESP_ERROR_CHECK(sht3x_measure(&sht3x_dev, &temperature, &humidity));
+        printf("sht3x_temp: %.4f\n", temperature);
+        printf("sht3x_humi: %.4f\n", humidity);
+
+        // Wait until 5 seconds are over
+        vTaskDelayUntil(&last_wakeup, pdMS_TO_TICKS(5000));
     }
 }
