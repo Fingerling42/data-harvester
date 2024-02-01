@@ -16,6 +16,7 @@
 #include "esp_netif_sntp.h"
 #include "lwip/ip_addr.h"
 #include "esp_sntp.h"
+#include "cJSON.h"
 
 // Include header files of sensors
 #include "sht3x.h"
@@ -214,16 +215,18 @@ void app_main(void)
 
     scd4x_init_desc(&scd4x_dev, I2C_MASTER_BUS, I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO);
     scd4x_wake_up(&scd4x_dev);
-    vTaskDelay(pdMS_TO_TICKS(30));
+    vTaskDelay(pdMS_TO_TICKS(500));
     scd4x_stop_periodic_measurement(&scd4x_dev);
     vTaskDelay(pdMS_TO_TICKS(500));
     scd4x_reinit(&scd4x_dev);
+    vTaskDelay(pdMS_TO_TICKS(500));
 
     uint16_t serial[3];
     scd4x_get_serial_number(&scd4x_dev, serial, serial + 1, serial + 2);
     ESP_LOGI(TAG, "SCD4x serial number: 0x%04x%04x%04x", serial[0], serial[1], serial[2]);
 
     scd4x_start_periodic_measurement(&scd4x_dev);
+    vTaskDelay(pdMS_TO_TICKS(500));
 
     vTaskDelay(pdMS_TO_TICKS(DELAY_TICKS));
     ESP_LOGI(TAG, "Sensors initialized successfully");
@@ -233,26 +236,36 @@ void app_main(void)
     // Main loop
     while(true)
     {
-    	// Get timestamp
+    	// Prepare JSON object
+    	cJSON *json = cJSON_CreateObject();
+
+    	// Get timestamp and save to JSON
     	gettimeofday(&tv_now, NULL);
     	timestamp = tv_now.tv_sec + tv_now.tv_usec * 0.000001;
+    	cJSON_AddNumberToObject(json, "timestamp", timestamp);
 
-        // Perform one measurement of SHT3x sensor
+        // Perform one measurement of SHT3x sensor and save it to JSON
         ESP_ERROR_CHECK(sht3x_measure(&sht3x_dev, &temperature, &humidity));
-        printf("[%.4f] sht3x_temp: %.4f\n", timestamp, temperature);
-        printf("[%.4f] sht3x_humi: %.4f\n", timestamp, humidity);
+        cJSON_AddNumberToObject(json, "temperature", temperature);
+        cJSON_AddNumberToObject(json, "humidity", humidity);
 
-        // Perform one measurement of BH1750 sensor
+        // Perform one measurement of BH1750 sensor and save it to JSON
         if (bh1750_read(&bh1750_dev, &lux) != ESP_OK)
             printf("Could not read light sensor data\n");
         else
-            printf("[%.4f] bh1750_lux: %d\n", timestamp, lux);
+        	cJSON_AddNumberToObject(json, "luminosity", lux);
 
-        // Perform one measurement of SCD4x sensor
+        // Perform one measurement of SCD4x sensor and save it to JSON
         if (scd4x_read_measurement(&scd4x_dev, &co2, &temp_scd4x, &humi_scd4x) != ESP_OK)
         	printf("Could not read SCD4x sensor data\n");
         else
-        	printf("[%.4f] scd4x_co2: %u\n", timestamp, co2);
+        	cJSON_AddNumberToObject(json, "co2", co2);
+
+        // Print JSON string and free objects
+        char *json_str = cJSON_Print(json);
+        printf("%s\n", json_str);
+        cJSON_free(json_str);
+        cJSON_Delete(json);
 
         // Wait until delay is over
         vTaskDelayUntil(&last_wakeup, pdMS_TO_TICKS(DELAY_TICKS));
