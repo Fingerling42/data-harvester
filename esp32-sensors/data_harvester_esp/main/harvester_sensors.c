@@ -13,6 +13,9 @@
 #include "esp_event.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
+#include "esp_netif_sntp.h"
+#include "lwip/ip_addr.h"
+#include "esp_sntp.h"
 
 // Include header files of sensors
 #include "sht3x.h"
@@ -43,6 +46,9 @@ static i2c_dev_t scd4x_dev = { 0 };
 #define ESP_WIFI_SAE_MODE					WPA3_SAE_PWE_BOTH
 #define EXAMPLE_H2E_IDENTIFIER				""
 
+// SNTP server
+#define SNTP_TIME_SERVER					"pool.ntp.org"
+
 
 // I2C pin numbers
 #define I2C_MASTER_SCL_IO           19     // GPIO number used for I2C master clock
@@ -52,6 +58,28 @@ static i2c_dev_t scd4x_dev = { 0 };
 // Devices address
 #define SHT3X_ADDR					0x44
 #define BH1750_ADDR					BH1750_ADDR_LO
+
+#define DELAY_TICKS					5000 	// Sensors readings delay in millisec
+
+static void obtain_time(void)
+{
+
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG(SNTP_TIME_SERVER);
+    esp_netif_sntp_init(&config);
+
+    // Wait for time to be set
+    time_t now = 0;
+    struct tm timeinfo = { 0 };
+    int retry = 0;
+    const int retry_count = 15;
+    while (esp_netif_sntp_sync_wait(2000 / portTICK_PERIOD_MS) == ESP_ERR_TIMEOUT && ++retry < retry_count) {
+        ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
+    }
+    time(&now);
+    localtime_r(&now, &timeinfo);
+
+    esp_netif_sntp_deinit();
+}
 
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
@@ -136,7 +164,7 @@ void wifi_init(void)
 void app_main(void)
 {
 	struct timeval tv_now;
-	float timestamp;
+	double timestamp;
 
     // Initialize NVS
     esp_err_t ret = nvs_flash_init();
@@ -148,6 +176,16 @@ void app_main(void)
 
 	// Connect to Wi-Fi access point
 	wifi_init();
+
+	// Initialize time for NTP sync
+	time_t now;
+	obtain_time();
+    time(&now);
+
+	// Set timezone
+    setenv("TZ", "EET-2EEST,M3.5.0/3,M10.5.0/4", 1);
+    tzset();
+
 
 	// Initialize I2C
 	ESP_ERROR_CHECK(i2cdev_init());
@@ -176,7 +214,9 @@ void app_main(void)
 
     scd4x_init_desc(&scd4x_dev, I2C_MASTER_BUS, I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO);
     scd4x_wake_up(&scd4x_dev);
+    vTaskDelay(pdMS_TO_TICKS(30));
     scd4x_stop_periodic_measurement(&scd4x_dev);
+    vTaskDelay(pdMS_TO_TICKS(500));
     scd4x_reinit(&scd4x_dev);
 
     uint16_t serial[3];
@@ -185,6 +225,7 @@ void app_main(void)
 
     scd4x_start_periodic_measurement(&scd4x_dev);
 
+    vTaskDelay(pdMS_TO_TICKS(DELAY_TICKS));
     ESP_LOGI(TAG, "Sensors initialized successfully");
 
     TickType_t last_wakeup = xTaskGetTickCount();
@@ -192,9 +233,9 @@ void app_main(void)
     // Main loop
     while(true)
     {
-    	vTaskDelay(pdMS_TO_TICKS(5000));
+    	// Get timestamp
     	gettimeofday(&tv_now, NULL);
-    	timestamp = (float)tv_now.tv_sec + (float)tv_now.tv_usec * 0.000001;
+    	timestamp = tv_now.tv_sec + tv_now.tv_usec * 0.000001;
 
         // Perform one measurement of SHT3x sensor
         ESP_ERROR_CHECK(sht3x_measure(&sht3x_dev, &temperature, &humidity));
@@ -213,8 +254,8 @@ void app_main(void)
         else
         	printf("[%.4f] scd4x_co2: %u\n", timestamp, co2);
 
-        // Wait until 5 seconds are over
-        vTaskDelayUntil(&last_wakeup, pdMS_TO_TICKS(5000));
+        // Wait until delay is over
+        vTaskDelayUntil(&last_wakeup, pdMS_TO_TICKS(DELAY_TICKS));
 
     }
 }
