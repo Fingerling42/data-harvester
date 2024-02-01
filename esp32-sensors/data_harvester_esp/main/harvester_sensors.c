@@ -262,7 +262,7 @@ void app_main(void)
         	cJSON_AddNumberToObject(json, "co2", co2);
 
         // Print JSON string and free objects
-        char *json_str = cJSON_Print(json);
+        char *json_str = cJSON_PrintUnformatted(json);
         printf("%s\n", json_str);
         cJSON_free(json_str);
         cJSON_Delete(json);
