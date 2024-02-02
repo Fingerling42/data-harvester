@@ -12,7 +12,15 @@ class ESP32SensorNode(Node):
 
     def __init__(self):
         super().__init__("esp32_sensors_node")  # node name
-        self.get_logger().info('Testing sensors node')
+
+        # Declare used parameters
+        self.declare_parameters(
+            namespace='',
+            parameters=[
+                ('esp_port', rclpy.Parameter.Type.STRING),
+                ('esp_baudrate', rclpy.Parameter.Type.INTEGER)
+            ]
+        )
 
     def __enter__(self):
         """
