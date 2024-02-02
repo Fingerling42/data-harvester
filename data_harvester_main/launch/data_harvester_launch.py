@@ -23,13 +23,14 @@ def generate_launch_description():
         'turtlebot4_slam.yaml'
     )
 
-    # Creating node for sender with params from config
+    # Creating main node with params from config
     data_harvester_main = Node(
         package='data_harvester_main',
         executable='data_harvester_main',
         parameters=[config_harvester],
     )
 
+    # Adding launch file from Turtlebot 4 SLAM
     turtlebot4_slam = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(
             get_package_share_directory('turtlebot4_navigation'), 'launch'),
@@ -39,7 +40,7 @@ def generate_launch_description():
         }.items()
     )
 
-    # Add node to launching
+    # Add nodes to launching
     ld.add_action(turtlebot4_slam)
     ld.add_action(data_harvester_main)
     return ld

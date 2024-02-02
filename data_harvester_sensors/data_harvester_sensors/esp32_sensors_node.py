@@ -12,6 +12,7 @@ class ESP32SensorNode(Node):
 
     def __init__(self):
         super().__init__("esp32_sensors_node")  # node name
+        self.get_logger().info('Testing sensors node')
 
     def __enter__(self):
         """
