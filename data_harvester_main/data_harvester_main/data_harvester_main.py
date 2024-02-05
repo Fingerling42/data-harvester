@@ -23,6 +23,7 @@ from irobot_create_msgs.action import WallFollow, Undock
 from irobot_create_msgs.msg import DockStatus, Mouse, IrIntensityVector
 from sensor_msgs.msg import Imu, Image
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from data_harvester_interfaces.msg import DataHarvesterESPSensors
 
 from slam_toolbox.srv import SaveMap, SerializePoseGraph
 
@@ -53,17 +54,29 @@ class DataHarvesterMain(Node):
         self.runtime_min = self.get_parameter('runtime_min')
         self.map_name = self.get_parameter('map_name')
 
+        # SLAM Pose data
+        self.robot_position_x = None
+        self.robot_position_y = None
+        self.robot_position_z = None
+        self.robot_orientation_x = None
+        self.robot_orientation_y = None
+        self.robot_orientation_z = None
+        self.robot_orientation_w = None
+
         # Preparing files for opening
         current_time = datetime.now()
         self.video_name = 'harvesting_process.mp4'
         self.odom_name = 'odom.json'
+        self.sensors_name = 'esp_sensors.json'
         workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester_main')))))
         self.archive_path = (workspace_dir + '/harvested-data-' + current_time.strftime("%d-%m-%Y-%H-%M-%S")
                              + '.zip')
         self.video_path = workspace_dir + '/' + self.video_name
         self.odom_path = workspace_dir + '/' + self.odom_name
+        self.sensors_path = workspace_dir + '/' + self.sensors_name
         self.map_path = workspace_dir + '/' + self.map_name.value
         self.odom_file = open(self.odom_path, 'w')
+        self.sensors_file = open(self.sensors_path, 'w')
 
         # Preparing OpenCV for video recording
         self.opencv_bridge = CvBridge()
@@ -130,7 +143,7 @@ class DataHarvesterMain(Node):
             callback_group=workload_callback_group,
         )
 
-        # Creating subscribers to all odom sensors
+        # Creating subscribers to all sensors
         self.subscriber_mouse = Subscriber(
             self,
             Mouse,
@@ -164,18 +177,27 @@ class DataHarvesterMain(Node):
 
         # Creating a time synchronizer to collect sensors data on the same timestamp
         queue_size = 30
-        self.odom_topics_synchronizer = ApproximateTimeSynchronizer(
+        self.odom_synchronizer = ApproximateTimeSynchronizer(
             [
                 self.subscriber_mouse,
                 self.subscriber_imu,
                 self.subscriber_cliff,
                 self.subscriber_ir_bumper,
-                self.subscriber_slam_pose
+                self.subscriber_slam_pose,
             ],
             queue_size,
             0.01,
         )
-        self.odom_topics_synchronizer.registerCallback(self.record_odom)
+        self.odom_synchronizer.registerCallback(self.record_odom)
+
+        # Creating subscriber to ESP sensors topic
+        self.subscriber_esp_sensors = self.create_subscription(
+            DataHarvesterESPSensors,
+            '/data_harvester/esp_sensors',
+            self.subscriber_sensors_callback,
+            qos_profile=qos_profile_sensor_data,
+            callback_group=workload_callback_group,
+        )
 
         # Creating subscriber to image topic
         self.subscriber_video = self.create_subscription(
@@ -211,6 +233,7 @@ class DataHarvesterMain(Node):
         self.map_serializer_done_event.wait()
 
         self.odom_file.close()
+        self.sensors_file.close()
         self.video_writer.release()
 
         # Create resulting archive with harvested data
@@ -226,6 +249,11 @@ class DataHarvesterMain(Node):
                 zip_file.write(self.odom_name)
             except FileNotFoundError:
                 self.get_logger().error('Odometry has not been harvested')
+
+            try:
+                zip_file.write(self.sensors_name)
+            except FileNotFoundError:
+                self.get_logger().error('ESP sensors data has not been harvested')
 
             try:
                 zip_file.write(self.map_name.value + '.pgm')
@@ -254,6 +282,10 @@ class DataHarvesterMain(Node):
             pass
         try:
             os.remove(self.odom_path)
+        except FileNotFoundError:
+            pass
+        try:
+            os.remove(self.sensors_path)
         except FileNotFoundError:
             pass
         try:
@@ -307,6 +339,47 @@ class DataHarvesterMain(Node):
             frameSize=size
         )
 
+    def subscriber_sensors_callback(self, esp_sensors_msg):
+        """
+        A callback function that write all ESP sensors messages to JSON file
+        :param esp_sensors_msg: Air quality data from ESP
+        :return: None
+        """
+        if self.wall_follow_done_event.is_set() is not True:
+            self.get_logger().info('Starting collecting ESP sensors data...', once=True)
+            timestamp = float(esp_sensors_msg.header.stamp.sec + esp_sensors_msg.header.stamp.nanosec * pow(10, -9))
+
+            # ESP sensors
+            esp_temperature = float(esp_sensors_msg.temperature)
+            esp_humidity = float(esp_sensors_msg.humidity)
+            esp_luminosity = int(esp_sensors_msg.luminosity)
+            esp_co2 = int(esp_sensors_msg.co2)
+
+            sensors_dict = {
+                'timestamp': timestamp,
+                'slam_pose': {
+                    'robot_position': {
+                        'x': self.robot_position_x,
+                        'y': self.robot_position_y,
+                        'z': self.robot_position_z,
+                    },
+                    'robot_orientation': {
+                        'x': self.robot_orientation_x,
+                        'y': self.robot_orientation_y,
+                        'z': self.robot_orientation_z,
+                        'w': self.robot_orientation_w,
+                    },
+                },
+                'esp_air_sensors': {
+                    'temperature': esp_temperature,
+                    'humidity': esp_humidity,
+                    'luminosity': esp_luminosity,
+                    'co2': esp_co2,
+                }
+            }
+
+            json.dump(sensors_dict, self.sensors_file, indent=4)
+
     def record_odom(self, mouse_msg, imu_msg, cliff_msg, bumper_ir_msg, pose_msg):
         """
         A callback function that write all odom messages to JSON file
@@ -323,13 +396,13 @@ class DataHarvesterMain(Node):
             timestamp = float(mouse_msg.header.stamp.sec + mouse_msg.header.stamp.nanosec * pow(10, -9))
 
             # Pose from SLAM
-            robot_position_x = float(pose_msg.pose.pose.position.x)
-            robot_position_y = float(pose_msg.pose.pose.position.y)
-            robot_position_z = float(pose_msg.pose.pose.position.z)
-            robot_orientation_x = float(pose_msg.pose.pose.orientation.x)
-            robot_orientation_y = float(pose_msg.pose.pose.orientation.y)
-            robot_orientation_z = float(pose_msg.pose.pose.orientation.z)
-            robot_orientation_w = float(pose_msg.pose.pose.orientation.w)
+            self.robot_position_x = float(pose_msg.pose.pose.position.x)
+            self.robot_position_y = float(pose_msg.pose.pose.position.y)
+            self.robot_position_z = float(pose_msg.pose.pose.position.z)
+            self.robot_orientation_x = float(pose_msg.pose.pose.orientation.x)
+            self.robot_orientation_y = float(pose_msg.pose.pose.orientation.y)
+            self.robot_orientation_z = float(pose_msg.pose.pose.orientation.z)
+            self.robot_orientation_w = float(pose_msg.pose.pose.orientation.w)
 
             # Mouse sensor
             mouse_integrated_x = float(mouse_msg.integrated_x)
@@ -362,61 +435,61 @@ class DataHarvesterMain(Node):
             bumper_front_right_intensity = int(bumper_ir_msg.readings[5].value)
             bumper_right_intensity = int(bumper_ir_msg.readings[6].value)
 
-            # Constructing dictionary for JSON dumping
-            sensor_dict = {'timestamp': timestamp,
-                           'slam_pose': {
-                               'robot_position': {
-                                   'x': robot_position_x,
-                                   'y': robot_position_y,
-                                   'z': robot_position_z,
-                               },
-                               'robot_orientation': {
-                                   'x': robot_orientation_x,
-                                   'y': robot_orientation_y,
-                                   'z': robot_orientation_z,
-                                   'w': robot_orientation_w,
-                               },
-                           },
-                           'mouse_sensor': {
-                               'integrated_x': mouse_integrated_x,
-                               'integrated_y': mouse_integrated_y,
-                           },
-                           'imu': {
-                               'orientation': {
-                                   'x': imu_orientation_x,
-                                   'y': imu_orientation_y,
-                                   'z': imu_orientation_z,
-                                   'w': imu_orientation_w,
-                               },
-                               'angular_velocity': {
-                                   'x': imu_ang_vel_x,
-                                   'y': imu_ang_vel_y,
-                                   'z': imu_ang_vel_z,
-                               },
-                               'linear_acceleration': {
-                                   'x': imu_linear_acc_x,
-                                   'y': imu_linear_acc_y,
-                                   'z': imu_linear_acc_z,
-                               }
-                           },
-                           'cliff_ir': {
-                               'cliff_side_left': cliff_side_left_intensity,
-                               'cliff_front_left': cliff_front_left_intensity,
-                               'cliff_front_right': cliff_front_right_intensity,
-                               'cliff_side_right': cliff_side_right_intensity,
-                           },
-                           'bumper_ir': {
-                               'bumper_side_left': bumper_side_left_intensity,
-                               'bumper_left': bumper_left_intensity,
-                               'bumper_front_left': bumper_front_left_intensity,
-                               'bumper_front_center_left': bumper_front_center_left_intensity,
-                               'bumper_front_center_right': bumper_front_center_right_intensity,
-                               'bumper_front_right': bumper_front_right_intensity,
-                               'bumper_right': bumper_right_intensity,
-                           }
-                           }
+            # Constructing odom dictionary for JSON dumping
+            odom_dict = {'timestamp': timestamp,
+                         'slam_pose': {
+                             'robot_position': {
+                                 'x': self.robot_position_x,
+                                 'y': self.robot_position_y,
+                                 'z': self.robot_position_z,
+                             },
+                             'robot_orientation': {
+                                 'x': self.robot_orientation_x,
+                                 'y': self.robot_orientation_y,
+                                 'z': self.robot_orientation_z,
+                                 'w': self.robot_orientation_w,
+                             },
+                         },
+                         'mouse_sensor': {
+                             'integrated_x': mouse_integrated_x,
+                             'integrated_y': mouse_integrated_y,
+                         },
+                         'imu': {
+                             'orientation': {
+                                 'x': imu_orientation_x,
+                                 'y': imu_orientation_y,
+                                 'z': imu_orientation_z,
+                                 'w': imu_orientation_w,
+                             },
+                             'angular_velocity': {
+                                 'x': imu_ang_vel_x,
+                                 'y': imu_ang_vel_y,
+                                 'z': imu_ang_vel_z,
+                             },
+                             'linear_acceleration': {
+                                 'x': imu_linear_acc_x,
+                                 'y': imu_linear_acc_y,
+                                 'z': imu_linear_acc_z,
+                             }
+                         },
+                         'cliff_ir': {
+                             'cliff_side_left': cliff_side_left_intensity,
+                             'cliff_front_left': cliff_front_left_intensity,
+                             'cliff_front_right': cliff_front_right_intensity,
+                             'cliff_side_right': cliff_side_right_intensity,
+                         },
+                         'bumper_ir': {
+                             'bumper_side_left': bumper_side_left_intensity,
+                             'bumper_left': bumper_left_intensity,
+                             'bumper_front_left': bumper_front_left_intensity,
+                             'bumper_front_center_left': bumper_front_center_left_intensity,
+                             'bumper_front_center_right': bumper_front_center_right_intensity,
+                             'bumper_front_right': bumper_front_right_intensity,
+                             'bumper_right': bumper_right_intensity,
+                         }
+                         }
 
-            json.dump(sensor_dict, self.odom_file, indent=4)
+            json.dump(odom_dict, self.odom_file, indent=4)
 
     def save_map(self):
         """
