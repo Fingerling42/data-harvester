@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>data_harvester_main</name>
-  <version>0.0.1</version>
-  <description>The package that transforms Turtlebot 4 to data harvester</description>
+  <name>data_harvester_wall_follow</name>
+  <version>0.0.2</version>
+  <description>The package that transforms Turtlebot 4 to data harvester with wall follow function</description>
   <maintainer email="berman@robonomics.network">Ivan Berman</maintainer>
   <license>Apache-2.0</license>
 

@@ -1,4 +1,4 @@
-data_harvester_main:
+data_harvester_wall_follow:
   ros__parameters:
     runtime_min: 0.2
     map_name: 'room_map'

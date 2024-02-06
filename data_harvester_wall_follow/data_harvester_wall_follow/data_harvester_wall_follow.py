@@ -33,13 +33,13 @@ from cv_bridge import CvBridge
 import cv2
 
 
-class DataHarvesterMain(Node):
+class DataHarvesterWallFollow(Node):
     """
-    A class for handle all necessary function of Turtlebot 4 ROS 2 stack: creating clients, make action requests
+    A class for harvesting data with Turtlebot 4 while following the wall of room
     """
 
     def __init__(self):
-        super().__init__("data_harvester_main")  # node name
+        super().__init__("data_harvester_wall_follow")  # node name
 
         # Declare used parameters
         self.declare_parameters(
@@ -68,7 +68,7 @@ class DataHarvesterMain(Node):
         self.video_name = 'harvesting_process.mp4'
         self.odom_name = 'odom.json'
         self.sensors_name = 'esp_sensors.json'
-        workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester_main')))))
+        workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester_wall_follow')))))
         self.archive_path = (workspace_dir + '/harvested-data-' + current_time.strftime("%d-%m-%Y-%H-%M-%S")
                              + '.zip')
         self.video_path = workspace_dir + '/' + self.video_name
@@ -637,13 +637,13 @@ def main(args=None):
 
     executor = MultiThreadedExecutor()
 
-    with DataHarvesterMain() as data_harvester_main:
+    with DataHarvesterWallFollow() as data_harvester_wall_follow:
         try:
-            executor.add_node(data_harvester_main)
+            executor.add_node(data_harvester_wall_follow)
             executor.spin()
         except KeyboardInterrupt:
-            data_harvester_main.get_logger().warn("Killing the data harvester node...")
-            executor.remove_node(data_harvester_main)
+            data_harvester_wall_follow.get_logger().warn("Killing the data harvester node...")
+            executor.remove_node(data_harvester_wall_follow)
 
 
 if __name__ == '__main__':

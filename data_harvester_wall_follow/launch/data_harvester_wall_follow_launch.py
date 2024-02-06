@@ -12,21 +12,21 @@ def generate_launch_description():
     ld = LaunchDescription()
 
     config_harvester = os.path.join(
-        get_package_share_directory('data_harvester_main'),
+        get_package_share_directory('data_harvester_wall_follow'),
         'config',
         'harvester_config.yaml'
     )
 
     config_slam = os.path.join(
-        get_package_share_directory('data_harvester_main'),
+        get_package_share_directory('data_harvester_wall_follow'),
         'config',
         'turtlebot4_slam.yaml'
     )
 
-    # Creating main node with params from config
-    data_harvester_main = Node(
-        package='data_harvester_main',
-        executable='data_harvester_main',
+    # Creating node for wall follow with params from config
+    data_harvester_wall_follow = Node(
+        package='data_harvester_wall_follow',
+        executable='data_harvester_wall_follow',
         parameters=[config_harvester],
     )
 
@@ -42,5 +42,5 @@ def generate_launch_description():
 
     # Add nodes to launching
     ld.add_action(turtlebot4_slam)
-    ld.add_action(data_harvester_main)
+    ld.add_action(data_harvester_wall_follow)
     return ld
