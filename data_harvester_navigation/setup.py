@@ -24,6 +24,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'data_harvester_navigator = data_harvester_navigation.data_harvester_navigator:main',
         ],
     },
 )
