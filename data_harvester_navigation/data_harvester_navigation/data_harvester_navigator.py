@@ -11,6 +11,7 @@ class DataHarvesterNavigator(TurtleBot4Navigator):
     """
     def __init__(self):
         super().__init__()
+        self.node_name = 'data_harvester_navigator'
 
         # Set initial pose
         initial_pose = self.getPoseStamped(

@@ -31,6 +31,7 @@ def generate_launch_description():
             '/localization.launch.py']),
         launch_arguments={
             'params': config_localization,
+            'log_level': 'error',
         }.items()
     )
 
@@ -43,7 +44,14 @@ def generate_launch_description():
         }.items()
     )
 
+    # Creating node for preparing navigation with data harvesting
+    data_harvester_navigator = Node(
+        package='data_harvester_navigation',
+        executable='data_harvester_navigator',
+    )
+
     ld.add_action(turtlebot4_localization)
     ld.add_action(turtlebot4_navigation)
+    ld.add_action(data_harvester_navigator)
 
     return ld
