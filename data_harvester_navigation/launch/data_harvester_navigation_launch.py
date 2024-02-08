@@ -18,6 +18,12 @@ def generate_launch_description():
         'turtlebot4_localization.yaml'
     )
 
+    config_navigation = os.path.join(
+        get_package_share_directory('data_harvester_navigation'),
+        'config',
+        'turtlebot4_nav2.yaml'
+    )
+
     # Adding launch files from Turtlebot 4 Navigation stack
     turtlebot4_localization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(
@@ -28,5 +34,16 @@ def generate_launch_description():
         }.items()
     )
 
+    turtlebot4_navigation = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([os.path.join(
+            get_package_share_directory('turtlebot4_navigation'), 'launch'),
+            '/nav2.launch.py']),
+        launch_arguments={
+            'params_file': config_navigation,
+        }.items()
+    )
+
     ld.add_action(turtlebot4_localization)
+    ld.add_action(turtlebot4_navigation)
+
     return ld
