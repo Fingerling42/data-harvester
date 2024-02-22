@@ -13,6 +13,10 @@ from ament_index_python.packages import get_package_share_directory
 
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 
+from tf2_ros import TransformException
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
+
 from irobot_create_msgs.msg import Mouse, IrIntensityVector, DockStatus
 from sensor_msgs.msg import Imu, Image
 from geometry_msgs.msg import PoseWithCovarianceStamped
@@ -30,13 +34,16 @@ class DataHarvesterChronicler(Node):
     def __init__(self):
         super().__init__("data_harvester_chronicler")  # node name
 
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
         # Callback groups
         workload_callback_group = ReentrantCallbackGroup()
 
         # Preparing files for opening
         current_time = datetime.now()
         self.video_name = 'harvesting_process.mp4'
-        self.json_name = 'esp_sensors.json'
+        self.json_name = 'data.json'
         workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester_chronicler')))))
         self.archive_path = (workspace_dir + '/harvested-data-' + current_time.strftime("%d-%m-%Y-%H-%M-%S")
                              + '.zip')
@@ -207,8 +214,46 @@ class DataHarvesterChronicler(Node):
             esp_luminosity = int(esp_sensors_msg.luminosity)
             esp_co2 = int(esp_sensors_msg.co2)
 
+            # Getting pose from transform
+            try:
+                coord_transform = self.tf_buffer.lookup_transform(
+                    'map',
+                    'base_link',
+                    rclpy.time.Time())
+
+                robot_position_x = float(coord_transform.transform.translation.x)
+                robot_position_y = float(coord_transform.transform.translation.y)
+                robot_position_z = float(coord_transform.transform.translation.z)
+                robot_orientation_x = float(coord_transform.transform.rotation.x)
+                robot_orientation_y = float(coord_transform.transform.rotation.y)
+                robot_orientation_z = float(coord_transform.transform.rotation.z)
+                robot_orientation_w = float(coord_transform.transform.rotation.w)
+
+            except TransformException:
+                self.get_logger().warn('Could not make pose transform')
+                robot_position_x = "NaN"
+                robot_position_y = "NaN"
+                robot_position_z = "NaN"
+                robot_orientation_x = "NaN"
+                robot_orientation_y = "NaN"
+                robot_orientation_z = "NaN"
+                robot_orientation_w = "NaN"
+
             # Constructing dictionary for JSON dumping
             json_dict = {'timestamp': timestamp,
+                         'pose': {
+                             'robot_position': {
+                                 'x': robot_position_x,
+                                 'y': robot_position_y,
+                                 'z': robot_position_z,
+                             },
+                             'robot_orientation': {
+                                 'x': robot_orientation_x,
+                                 'y': robot_orientation_y,
+                                 'z': robot_orientation_z,
+                                 'w': robot_orientation_w,
+                             },
+                         },
                          'esp_air_sensors': {
                              'temperature': esp_temperature,
                              'humidity': esp_humidity,

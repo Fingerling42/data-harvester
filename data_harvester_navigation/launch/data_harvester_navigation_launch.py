@@ -32,7 +32,7 @@ def generate_launch_description():
             '/localization.launch.py']),
         launch_arguments={
             'params': config_localization,
-            'log_level': 'info',
+            'log_level': 'error',
         }.items()
     )
 
