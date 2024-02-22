@@ -27,6 +27,8 @@ class DataHarvesterNavigator(TurtleBot4Navigator):
         # Wait for Nav2
         self.waitUntilNav2Active()
 
+        self.info("Navigator is ready")
+
     def __enter__(self):
         """
         Enter the object runtime context
