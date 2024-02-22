@@ -20,6 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'data_harvester_chronicler = data_harvester_chronicler.data_harvester_chronicler:main',
         ],
     },
 )
