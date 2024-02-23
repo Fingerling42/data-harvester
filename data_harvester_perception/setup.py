@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'esp32_sensors_node = data_harvester_perception.esp32_sensors_node:main',
+            'wifi_scanner_node = data_harvester_perception.wifi_scanner_node:main',
         ],
     },
 )
