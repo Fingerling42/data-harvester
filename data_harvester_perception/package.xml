@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>data_harvester_sensors</name>
-  <version>0.0.1</version>
-  <description>The package for connecting sensor board based on ESP32 and esphome to data harvester</description>
+  <name>data_harvester_perception</name>
+  <version>0.0.2</version>
+  <description>The package for routing all sensor devices of data harvester to ROS 2</description>
   <maintainer email="berman@robonomics.network">Ivan Berman</maintainer>
   <license>Apache-2.0</license>
 

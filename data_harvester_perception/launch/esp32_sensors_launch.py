@@ -9,14 +9,14 @@ def generate_launch_description():
     ld = LaunchDescription()
 
     config_esp_sensors = os.path.join(
-        get_package_share_directory('data_harvester_sensors'),
+        get_package_share_directory('data_harvester_perception'),
         'config',
         'esp_config.yaml'
     )
 
     # Creating ESP32 sensors node with params
     esp32_sensors_node = Node(
-        package='data_harvester_sensors',
+        package='data_harvester_perception',
         executable='esp32_sensors_node',
         parameters=[config_esp_sensors],
     )

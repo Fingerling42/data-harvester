@@ -2,11 +2,11 @@ from setuptools import find_packages, setup
 import os
 from glob import glob
 
-package_name = 'data_harvester_sensors'
+package_name = 'data_harvester_perception'
 
 setup(
     name=package_name,
-    version='0.0.1',
+    version='0.0.2',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -19,12 +19,12 @@ setup(
     zip_safe=True,
     maintainer='Ivan Berman',
     maintainer_email='berman@robonomics.network',
-    description='The package for connecting sensor board based on ESP32 and esphome to data harvester',
+    description='The package for routing all sensor devices of data harvester to ROS 2',
     license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'esp32_sensors_node = data_harvester_sensors.esp32_sensors_node:main',
+            'esp32_sensors_node = data_harvester_perception.esp32_sensors_node:main',
         ],
     },
 )
