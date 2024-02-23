@@ -1,0 +1,19 @@
+[Unit]
+After=network-online.target
+Description="Data Harvester sensor devices bring up"
+
+[Service]
+
+User=ubuntu
+Group=ubuntu
+ExecStart=/bin/bash -c 'source /etc/turtlebot4/setup.bash;\
+source /home/ubuntu/data_harvester_ws/install/setup.bash;\
+ros2 launch data_harvester_perception esp32_sensors_launch.py;\
+ros2 launch data_harvester_perception esp32_sensors_launch.py;\
+'
+RemainAfterExit=no
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target
