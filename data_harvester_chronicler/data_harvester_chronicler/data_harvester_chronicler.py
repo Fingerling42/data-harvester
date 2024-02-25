@@ -19,8 +19,7 @@ from tf2_ros.transform_listener import TransformListener
 
 from irobot_create_msgs.msg import Mouse, IrIntensityVector, DockStatus
 from sensor_msgs.msg import Imu, Image
-from geometry_msgs.msg import PoseWithCovarianceStamped
-from data_harvester_interfaces.msg import DataHarvesterESPSensors
+from data_harvester_interfaces.msg import DataHarvesterESPSensors, DataHarvesterWiFiScan
 
 from cv_bridge import CvBridge
 import cv2
@@ -43,17 +42,30 @@ class DataHarvesterChronicler(Node):
         # Preparing files for opening
         current_time = datetime.now()
         self.video_name = 'harvesting_process.mp4'
-        self.json_name = 'data.json'
+        self.data_json_name = 'data.json'
+        self.wifi_json_name = 'wifi_list.json'
         workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester_chronicler')))))
         self.archive_path = (workspace_dir + '/harvested-data-' + current_time.strftime("%d-%m-%Y-%H-%M-%S")
                              + '.zip')
         self.video_path = workspace_dir + '/' + self.video_name
-        self.json_path = workspace_dir + '/' + self.json_name
-        self.json_file = open(self.json_path, 'w')
+        self.data_json_path = workspace_dir + '/' + self.data_json_name
+        self.wifi_json_path = workspace_dir + '/' + self.wifi_json_name
+        self.data_json_file = open(self.data_json_path, 'w')
+        self.wifi_json_file = open(self.wifi_json_path, 'w')
 
         # # Preparing OpenCV for video recording
-        self.opencv_bridge = CvBridge()
-        self.video_writer = None
+        # self.opencv_bridge = CvBridge()
+        # video_size = (300, 300)
+        # fourcc = cv2.VideoWriter_fourcc(*'avc1')
+        # try:
+        #     self.video_writer = cv2.VideoWriter(
+        #         self.video_path,
+        #         fourcc=fourcc,
+        #         fps=30,
+        #         frameSize=video_size,
+        #     )
+        # except Exception as e:
+        #     self.get_logger().error('Error initializing video writer: %s' % str(e))
 
         # Creating subscribers to all sensors
         self.subscriber_mouse = Subscriber(
@@ -95,7 +107,7 @@ class DataHarvesterChronicler(Node):
                 self.subscriber_imu,
                 self.subscriber_cliff,
                 self.subscriber_ir_bumper,
-                self.subscriber_esp_sensors
+                self.subscriber_esp_sensors,
             ],
             queue_size,
             0.1,
@@ -103,13 +115,13 @@ class DataHarvesterChronicler(Node):
         self.data_synchronizer.registerCallback(self.record_data)
 
         # Creating subscriber to image topic
-        self.subscriber_video = self.create_subscription(
-            Image,
-            'oakd/rgb/preview/image_raw',
-            self.subscriber_video_callback,
-            qos_profile_sensor_data,
-            callback_group=workload_callback_group,
-        )
+        # self.subscriber_video = self.create_subscription(
+        #     Image,
+        #     'oakd/rgb/preview/image_raw',
+        #     self.subscriber_video_callback,
+        #     qos_profile_sensor_data,
+        #     callback_group=workload_callback_group,
+        # )
 
         # Creating subscriber to dock status
         self.dock_status = None
@@ -121,37 +133,29 @@ class DataHarvesterChronicler(Node):
             callback_group=workload_callback_group,
         )
 
-    def subscriber_video_callback(self, msg):
-        """
-        Callback from oakd image topic that starts recording video
-        :param msg: Image from topic
-        :return: None
-        """
-        if self.dock_status is False:
-            self.get_logger().info('Starting video recording...', once=True)
-            # Convert Image object to OpenCV.Mat object
-            cv_image = self.opencv_bridge.imgmsg_to_cv2(msg)
-
-            # Check if video_writer is needed to be initialized
-            if self.video_writer is None:
-                self.init_video_writer(msg)
-
-            self.video_writer.write(cv_image)
-
-    def init_video_writer(self, msg):
-        """
-        A function for initialization of video writer
-        :param msg: Image from topic
-        :return: None
-        """
-        size = (msg.width, msg.height)
-        fourcc = cv2.VideoWriter_fourcc(*'avc1')
-        self.video_writer = cv2.VideoWriter(
-            self.video_path,
-            fourcc=fourcc,
-            fps=30,
-            frameSize=size
+        # Creating subscriber to Wi-Fi scanner
+        self.subscriber_wifi_scanner = self.create_subscription(
+            DataHarvesterWiFiScan,
+            'data_harvester/wifi_networks',
+            self.subscriber_wifi_scanner_callback,
+            qos_profile_sensor_data,
+            callback_group=workload_callback_group,
         )
+
+    # def subscriber_video_callback(self, msg):
+    #     """
+    #     Callback from oakd image topic that starts recording video
+    #     :param msg: Image from topic
+    #     :return: None
+    #     """
+    #     try:
+    #         if self.dock_status is False and self.video_writer.isOpened() is True:
+    #             self.get_logger().info('Starting video recording...', once=True)
+    #             # Convert Image object to OpenCV.Mat object
+    #             cv_image = self.opencv_bridge.imgmsg_to_cv2(msg)
+    #             self.video_writer.write(cv_image)
+    #     except Exception as e:
+    #         self.get_logger().error('Error while processing Image: %s' % str(e))
 
     def subscriber_dock_status_callback(self, msg):
         """
@@ -160,6 +164,74 @@ class DataHarvesterChronicler(Node):
         :return: None
         """
         self.dock_status = bool(msg.is_docked)
+
+    def subscriber_wifi_scanner_callback(self, msg):
+        """
+        Callback for writing Wi-Fi scanner output to file
+        :param msg: DataHarvesterWiFiScan with list of networks
+        :return: None
+        """
+        self.get_logger().info('Starting recording Wi-Fi scan...', once=True)
+
+        # Get timestamp
+        timestamp = float(msg.header.stamp.sec + msg.header.stamp.nanosec * pow(10, -9))
+
+        # Getting pose from transform
+        try:
+            coord_transform = self.tf_buffer.lookup_transform(
+                'map',
+                'base_link',
+                rclpy.time.Time())
+
+            robot_position_x = float(coord_transform.transform.translation.x)
+            robot_position_y = float(coord_transform.transform.translation.y)
+            robot_position_z = float(coord_transform.transform.translation.z)
+            robot_orientation_x = float(coord_transform.transform.rotation.x)
+            robot_orientation_y = float(coord_transform.transform.rotation.y)
+            robot_orientation_z = float(coord_transform.transform.rotation.z)
+            robot_orientation_w = float(coord_transform.transform.rotation.w)
+
+        except TransformException:
+            self.get_logger().warn('Could not make pose transform')
+            robot_position_x = "NaN"
+            robot_position_y = "NaN"
+            robot_position_z = "NaN"
+            robot_orientation_x = "NaN"
+            robot_orientation_y = "NaN"
+            robot_orientation_z = "NaN"
+            robot_orientation_w = "NaN"
+
+        # Fill dict with timestamp and pose
+        json_dict = {'timestamp': timestamp,
+                     'pose': {
+                         'robot_position': {
+                             'x': robot_position_x,
+                             'y': robot_position_y,
+                             'z': robot_position_z,
+                         },
+                         'robot_orientation': {
+                             'x': robot_orientation_x,
+                             'y': robot_orientation_y,
+                             'z': robot_orientation_z,
+                             'w': robot_orientation_w,
+                         },
+                     },
+                     }
+
+        # Add to dict all Wi-Fi SSID and signal straight
+        for network in msg.networks:
+            bssid = str(network.bssid)
+            ssid = str(network.ssid)
+            signal = int(network.signal)
+            wifi_dict = {
+                bssid: {
+                    'ssid': ssid,
+                    'signal': signal,
+                }
+            }
+            json_dict.update(wifi_dict)
+
+        json.dump(json_dict, self.wifi_json_file, indent=4)
 
     def record_data(self, mouse_msg, imu_msg, cliff_msg, bumper_ir_msg, esp_sensors_msg):
         """
@@ -172,7 +244,7 @@ class DataHarvesterChronicler(Node):
         :return: None
         """
         if self.dock_status is False:
-            self.get_logger().info('Starting collecting all data...', once=True)
+            self.get_logger().info('Starting collecting robot data...', once=True)
 
             # Getting all values of sensors readings
             timestamp = float(mouse_msg.header.stamp.sec + mouse_msg.header.stamp.nanosec * pow(10, -9))
@@ -299,7 +371,7 @@ class DataHarvesterChronicler(Node):
                          }
                          }
 
-            json.dump(json_dict, self.json_file, indent=4)
+            json.dump(json_dict, self.data_json_file, indent=4)
 
     def __enter__(self):
         """
@@ -316,30 +388,40 @@ class DataHarvesterChronicler(Node):
         :param exc_tb: exception traceback
         :return: None
         """
-        self.json_file.close()
-        self.video_writer.release()
+        self.data_json_file.close()
+        self.wifi_json_file.close()
+        # self.video_writer.release()
 
         # Create resulting archive with harvested data
         with ZipFile(self.archive_path, 'w') as zip_file:
             self.get_logger().info('Saving zip archive with harvested data to workspace dir...')
 
-            try:
-                zip_file.write(self.video_name)
-            except FileNotFoundError:
-                self.get_logger().error('Video has not been harvested')
+            # try:
+            #     zip_file.write(self.video_name)
+            # except FileNotFoundError:
+            #     self.get_logger().error('Video has not been harvested')
 
             try:
-                zip_file.write(self.json_name)
+                zip_file.write(self.data_json_name)
             except FileNotFoundError:
                 self.get_logger().error('Robot data has not been harvested')
 
+            try:
+                zip_file.write(self.wifi_json_name)
+            except FileNotFoundError:
+                self.get_logger().error('Wi-Fi scanning has not been harvested')
+
         # Garbage removal routine
+        # try:
+        #     os.remove(self.video_path)
+        # except FileNotFoundError:
+        #     pass
         try:
-            os.remove(self.video_path)
+            os.remove(self.data_json_path)
         except FileNotFoundError:
             pass
         try:
-            os.remove(self.json_path)
+            os.remove(self.wifi_json_path)
         except FileNotFoundError:
             pass
 
