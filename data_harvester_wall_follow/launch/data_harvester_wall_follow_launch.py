@@ -37,6 +37,7 @@ def generate_launch_description():
             '/slam.launch.py']),
         launch_arguments={
             'params': config_slam,
+            'sync': 'false',
         }.items()
     )
 
