@@ -50,8 +50,12 @@ class DataHarvesterChronicler(Node):
         self.video_path = workspace_dir + '/' + self.video_name
         self.data_json_path = workspace_dir + '/' + self.data_json_name
         self.wifi_json_path = workspace_dir + '/' + self.wifi_json_name
+
         self.data_json_file = open(self.data_json_path, 'w')
+        self.data_json_file.write('[\n')
+
         self.wifi_json_file = open(self.wifi_json_path, 'w')
+        self.wifi_json_file.write('[\n')
 
         # # Preparing OpenCV for video recording
         # self.opencv_bridge = CvBridge()
@@ -231,7 +235,8 @@ class DataHarvesterChronicler(Node):
             }
             json_dict.update(wifi_dict)
 
-        json.dump(json_dict, self.wifi_json_file, indent=4)
+        json_string = json.dumps(json_dict, indent=4)
+        self.wifi_json_file.write(json_string + ',\n')
 
     def record_data(self, mouse_msg, imu_msg, cliff_msg, bumper_ir_msg, esp_sensors_msg):
         """
@@ -371,7 +376,8 @@ class DataHarvesterChronicler(Node):
                          }
                          }
 
-            json.dump(json_dict, self.data_json_file, indent=4)
+            json_string = json.dumps(json_dict, indent=4)
+            self.data_json_file.write(json_string + ',\n')
 
     def __enter__(self):
         """
@@ -388,8 +394,12 @@ class DataHarvesterChronicler(Node):
         :param exc_tb: exception traceback
         :return: None
         """
+        self.data_json_file.write(']')
         self.data_json_file.close()
+
+        self.wifi_json_file.write(']')
         self.wifi_json_file.close()
+
         # self.video_writer.release()
 
         # Create resulting archive with harvested data
