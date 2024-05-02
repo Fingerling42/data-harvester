@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from zipfile import ZipFile
 import json
+from typing_extensions import Self, Any
 
 import rclpy
 from rclpy.node import Node
@@ -174,15 +175,15 @@ class DataHarvesterChronicler(Node):
     #     except Exception as e:
     #         self.get_logger().error('Error while processing Image: %s' % str(e))
 
-    def subscriber_dock_status_callback(self, msg):
+    def subscriber_dock_status_callback(self, msg: DockStatus) -> None:
         """
         Callback that update dock status
-        :param msg: message with DockStatus type
+        :param msg: Message with DockStatus type
         :return: None
         """
         self.dock_status = bool(msg.is_docked)
 
-    def subscriber_wifi_scanner_callback(self, msg):
+    def subscriber_wifi_scanner_callback(self, msg: DataHarvesterWiFiScan) -> None:
         """
         Callback for writing Wi-Fi scanner output to file
         :param msg: DataHarvesterWiFiScan with list of networks
@@ -251,10 +252,15 @@ class DataHarvesterChronicler(Node):
         json_string = json.dumps(json_dict, indent=4)
         self.wifi_json_file.write(json_string + ',\n')
 
-    def record_data(self, mouse_msg, imu_msg, cliff_msg, bumper_ir_msg, esp_sensors_msg):
+    def record_data(self,
+                    mouse_msg: Mouse,
+                    imu_msg: Imu,
+                    cliff_msg: IrIntensityVector,
+                    bumper_ir_msg: IrIntensityVector,
+                    esp_sensors_msg: DataHarvesterESPSensors) -> None:
         """
         A callback function that write all odom messages to JSON file
-        :param mouse_msg: mouse sensor msg
+        :param mouse_msg: Mouse sensor msg
         :param imu_msg: IMU msg
         :param cliff_msg: IR cliff sensor msg
         :param bumper_ir_msg: IR sensor on bumper msg
@@ -392,14 +398,14 @@ class DataHarvesterChronicler(Node):
             json_string = json.dumps(json_dict, indent=4)
             self.data_json_file.write(json_string + ',\n')
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """
         Enter the object runtime context
         :return: object itself
         """
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """
         Exit the object runtime context
         :param exc_type: exception that caused the context to be exited
@@ -451,7 +457,7 @@ class DataHarvesterChronicler(Node):
         self.get_logger().info('All done')
 
 
-def main(args=None):
+def main(args=None) -> None:
     rclpy.init(args=args)
 
     executor = MultiThreadedExecutor()
@@ -463,6 +469,7 @@ def main(args=None):
         except KeyboardInterrupt:
             data_harvester_chronicler.get_logger().warn("Killing the chronicler node...")
             executor.remove_node(data_harvester_chronicler)
+            executor.shutdown()
 
 
 if __name__ == '__main__':
