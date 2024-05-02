@@ -4,7 +4,7 @@ package_name = 'data_harvester_chronicler'
 
 setup(
     name=package_name,
-    version='0.0.1',
+    version='0.0.2',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -14,7 +14,7 @@ setup(
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='Ivan Berman',
-    maintainer_email='berman@robonomics.network',
+    maintainer_email='fingerling42@proton.me',
     description='The package for recording all harvested data',
     license='Apache-2.0',
     tests_require=['pytest'],

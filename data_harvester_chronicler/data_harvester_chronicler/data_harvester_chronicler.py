@@ -1,6 +1,5 @@
 import os
 from datetime import datetime
-from os.path import dirname
 from zipfile import ZipFile
 import json
 
@@ -9,7 +8,7 @@ from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.callback_groups import ReentrantCallbackGroup
-from ament_index_python.packages import get_package_share_directory
+from rcl_interfaces.srv import GetParameters
 
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 
@@ -18,19 +17,20 @@ from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
 from irobot_create_msgs.msg import Mouse, IrIntensityVector, DockStatus
-from sensor_msgs.msg import Imu, Image
+from sensor_msgs.msg import Imu  # , Image
 from data_harvester_interfaces.msg import DataHarvesterESPSensors, DataHarvesterWiFiScan
 
-from cv_bridge import CvBridge
-import cv2
+
+# from cv_bridge import CvBridge
+# import cv2
 
 
 class DataHarvesterChronicler(Node):
-    """
-    A class for recording all data that Data Harvester gets
-    """
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """
+        A class for recording all data that Data Harvester gets
+        """
         super().__init__("data_harvester_chronicler")  # node name
 
         self.tf_buffer = Buffer()
@@ -39,17 +39,30 @@ class DataHarvesterChronicler(Node):
         # Callback groups
         workload_callback_group = ReentrantCallbackGroup()
 
+        # Service for getting IPFS dir from pubsub
+        self.get_pubsub_parameter_client = self.create_client(
+            GetParameters,
+            'robonomics_ros2_pubsub/get_parameters'
+        )
+        while not self.get_pubsub_parameter_client.wait_for_service(timeout_sec=2.0):
+            self.get_logger().warn('Pubsub parameter service not available, waiting again...')
+
+        # Make request to get pubsub parameters with IPFS path and RWS user list
+        request = GetParameters.Request()
+        request.names = ['ipfs_dir_path']
+        future = self.get_pubsub_parameter_client.call_async(request)
+        rclpy.spin_until_future_complete(self, future)  # rclpy instead of self.executor, because constructor
+        # has not yet created an executor
+        self.ipfs_dir_path = future.result().values[0].string_value
+
         # Preparing files for opening
+        self.video_path = os.path.join(self.ipfs_dir_path, 'harvesting_process.mp4')
+        self.data_json_path = os.path.join(self.ipfs_dir_path, 'data.json')
+        self.wifi_json_path = os.path.join(self.ipfs_dir_path, 'wifi_list.json')
+
         current_time = datetime.now()
-        self.video_name = 'harvesting_process.mp4'
-        self.data_json_name = 'data.json'
-        self.wifi_json_name = 'wifi_list.json'
-        workspace_dir = dirname(dirname(dirname(dirname(get_package_share_directory('data_harvester_chronicler')))))
-        self.archive_path = (workspace_dir + '/harvested-data-' + current_time.strftime("%d-%m-%Y-%H-%M-%S")
-                             + '.zip')
-        self.video_path = workspace_dir + '/' + self.video_name
-        self.data_json_path = workspace_dir + '/' + self.data_json_name
-        self.wifi_json_path = workspace_dir + '/' + self.wifi_json_name
+        self.archive_path = os.path.join(self.ipfs_dir_path,
+                                         'harvested-data-' + current_time.strftime("%d-%m-%Y-%H-%M-%S") + '.zip')
 
         self.data_json_file = open(self.data_json_path, 'w')
         self.data_json_file.write('[\n')
@@ -412,12 +425,12 @@ class DataHarvesterChronicler(Node):
             #     self.get_logger().error('Video has not been harvested')
 
             try:
-                zip_file.write(self.data_json_name)
+                zip_file.write(self.data_json_path)
             except FileNotFoundError:
                 self.get_logger().error('Robot data has not been harvested')
 
             try:
-                zip_file.write(self.wifi_json_name)
+                zip_file.write(self.wifi_json_path)
             except FileNotFoundError:
                 self.get_logger().error('Wi-Fi scanning has not been harvested')
 
