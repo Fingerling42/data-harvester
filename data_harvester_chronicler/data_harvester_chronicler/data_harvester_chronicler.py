@@ -2,13 +2,16 @@ import os
 from datetime import datetime
 from zipfile import ZipFile
 import json
-from typing_extensions import Self, Any
+from typing_extensions import Self, Any, Optional
 
 import rclpy
-from rclpy.node import Node
+
+from rclpy.lifecycle import Node, LifecycleState, Publisher, State, TransitionCallbackReturn
+from rclpy.node import Client, Subscription
+
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.qos import qos_profile_sensor_data
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 from rcl_interfaces.srv import GetParameters
 
 from message_filters import ApproximateTimeSynchronizer, Subscriber
@@ -18,24 +21,50 @@ from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
 from irobot_create_msgs.msg import Mouse, IrIntensityVector, DockStatus
-from sensor_msgs.msg import Imu  # , Image
+from sensor_msgs.msg import Imu
+from std_msgs.msg import String
 from data_harvester_interfaces.msg import DataHarvesterESPSensors, DataHarvesterWiFiScan
-
-
-# from cv_bridge import CvBridge
-# import cv2
 
 
 class DataHarvesterChronicler(Node):
 
     def __init__(self) -> None:
         """
-        A class for recording all data that Data Harvester gets
+        A class for recording all data that data harvester gets
         """
         super().__init__("data_harvester_chronicler")  # node name
 
+        # Init all variables
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.get_pubsub_parameter_client: Optional[Client] = None
+        self.ipfs_dir_path: Optional[str] = None
+        self.subscriber_mouse: Optional[Subscriber] = None
+        self.subscriber_imu: Optional[Subscriber] = None
+        self.subscriber_cliff: Optional[Subscriber] = None
+        self.subscriber_ir_bumper: Optional[Subscriber] = None
+        self.subscriber_esp_sensors: Optional[Subscriber] = None
+        self.data_synchronizer: Optional[ApproximateTimeSynchronizer] = None
+        self.dock_status: Optional[bool] = None
+        self.subscriber_dock_status: Optional[Subscription] = None
+        self.subscriber_wifi_scanner: Optional[Subscription] = None
+        self.publisher_archive_name: Optional[Publisher] = None
+        self.video_path: Optional[str] = None
+        self.data_json_path: Optional[str] = None
+        self.wifi_json_path: Optional[str] = None
+        self.archive_path: Optional[str] = None
+        self.data_json_file: Optional[str] = None
+        self.wifi_json_file: Optional[str] = None
+
+    def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
+        """
+        Configure the node, after a configuring transition is requested. This callback is being called when
+        the lifecycle node enters the configuring state.
+        :return: The state machine either invokes a transition to the inactive state or stays
+        in "unconfigured" depending on the return value.
+        """
+
+        self.get_logger().info('Configuring chronicler...')
 
         # Callback groups
         workload_callback_group = ReentrantCallbackGroup()
@@ -43,7 +72,8 @@ class DataHarvesterChronicler(Node):
         # Service for getting IPFS dir from pubsub
         self.get_pubsub_parameter_client = self.create_client(
             GetParameters,
-            'robonomics_ros2_pubsub/get_parameters'
+            'robonomics_ros2_pubsub/get_parameters',
+            callback_group=MutuallyExclusiveCallbackGroup()
         )
         while not self.get_pubsub_parameter_client.wait_for_service(timeout_sec=2.0):
             self.get_logger().warn('Pubsub parameter service not available, waiting again...')
@@ -52,12 +82,10 @@ class DataHarvesterChronicler(Node):
         request = GetParameters.Request()
         request.names = ['ipfs_dir_path']
         future = self.get_pubsub_parameter_client.call_async(request)
-        rclpy.spin_until_future_complete(self, future)  # rclpy instead of self.executor, because constructor
-        # has not yet created an executor
+        self.executor.spin_until_future_complete(future)
         self.ipfs_dir_path = future.result().values[0].string_value
 
         # Preparing files for opening
-        self.video_path = os.path.join(self.ipfs_dir_path, 'harvesting_process.mp4')
         self.data_json_path = os.path.join(self.ipfs_dir_path, 'data.json')
         self.wifi_json_path = os.path.join(self.ipfs_dir_path, 'wifi_list.json')
 
@@ -70,20 +98,6 @@ class DataHarvesterChronicler(Node):
 
         self.wifi_json_file = open(self.wifi_json_path, 'w')
         self.wifi_json_file.write('[\n')
-
-        # # Preparing OpenCV for video recording
-        # self.opencv_bridge = CvBridge()
-        # video_size = (300, 300)
-        # fourcc = cv2.VideoWriter_fourcc(*'avc1')
-        # try:
-        #     self.video_writer = cv2.VideoWriter(
-        #         self.video_path,
-        #         fourcc=fourcc,
-        #         fps=30,
-        #         frameSize=video_size,
-        #     )
-        # except Exception as e:
-        #     self.get_logger().error('Error initializing video writer: %s' % str(e))
 
         # Creating subscribers to all sensors
         self.subscriber_mouse = Subscriber(
@@ -132,17 +146,7 @@ class DataHarvesterChronicler(Node):
         )
         self.data_synchronizer.registerCallback(self.record_data)
 
-        # Creating subscriber to image topic
-        # self.subscriber_video = self.create_subscription(
-        #     Image,
-        #     'oakd/rgb/preview/image_raw',
-        #     self.subscriber_video_callback,
-        #     qos_profile_sensor_data,
-        #     callback_group=workload_callback_group,
-        # )
-
         # Creating subscriber to dock status
-        self.dock_status = None
         self.subscriber_dock_status = self.create_subscription(
             DockStatus,
             'dock_status',
@@ -160,20 +164,15 @@ class DataHarvesterChronicler(Node):
             callback_group=workload_callback_group,
         )
 
-    # def subscriber_video_callback(self, msg):
-    #     """
-    #     Callback from oakd image topic that starts recording video
-    #     :param msg: Image from topic
-    #     :return: None
-    #     """
-    #     try:
-    #         if self.dock_status is False and self.video_writer.isOpened() is True:
-    #             self.get_logger().info('Starting video recording...', once=True)
-    #             # Convert Image object to OpenCV.Mat object
-    #             cv_image = self.opencv_bridge.imgmsg_to_cv2(msg)
-    #             self.video_writer.write(cv_image)
-    #     except Exception as e:
-    #         self.get_logger().error('Error while processing Image: %s' % str(e))
+        # Creating publisher for archive file name after all work is done
+        self.publisher_archive_name = self.create_publisher(
+            String,
+            'data_harvester/archive_name',
+            10
+        )
+
+        self.get_logger().info('Configuring is successful')
+        return TransitionCallbackReturn.SUCCESS
 
     def subscriber_dock_status_callback(self, msg: DockStatus) -> None:
         """
@@ -398,6 +397,68 @@ class DataHarvesterChronicler(Node):
             json_string = json.dumps(json_dict, indent=4)
             self.data_json_file.write(json_string + ',\n')
 
+    def on_shutdown(self, state: State) -> TransitionCallbackReturn:
+        """
+        Shutdown the node, after a shutting-down transition is requested. The callback is being called when the
+        lifecycle node enters the "shutting down" state.
+        :return: The state machine either invokes a transition to the "finalized" state or stays
+        in the current state depending on the return value.
+        """
+        # Close files
+        self.data_json_file.write(']')
+        self.data_json_file.close()
+
+        self.wifi_json_file.write(']')
+        self.wifi_json_file.close()
+
+        # Create resulting archive with harvested data
+        saved_file_counter = 0
+        with ZipFile(self.archive_path, 'w') as zip_file:
+            self.get_logger().info('Saving zip archive with harvested data to workspace dir...')
+
+            try:
+                zip_file.write(self.data_json_path, os.path.basename(self.data_json_path))
+                saved_file_counter += 1
+            except FileNotFoundError:
+                self.get_logger().error('Robot data has not been harvested')
+
+            try:
+                zip_file.write(self.wifi_json_path, os.path.basename(self.wifi_json_path))
+                saved_file_counter += 1
+            except FileNotFoundError:
+                self.get_logger().error('Wi-Fi scanning has not been harvested')
+
+        # Garbage removal routine
+        try:
+            os.remove(self.data_json_path)
+        except FileNotFoundError:
+            pass
+        try:
+            os.remove(self.wifi_json_path)
+        except FileNotFoundError:
+            pass
+
+        # Publish last message with archive name
+        if saved_file_counter > 0:
+            archive_name_msg = String()
+            archive_name_msg.data = str(os.path.basename(self.archive_path))
+            self.publisher_archive_name.publish(archive_name_msg)
+            self.publisher_archive_name.wait_for_all_acked()
+
+        # Calling destructors
+        self.destroy_lifecycle_publisher(self.publisher_archive_name)
+        self.destroy_client(self.get_pubsub_parameter_client)
+        self.destroy_subscription(self.subscriber_mouse)
+        self.destroy_subscription(self.subscriber_imu)
+        self.destroy_subscription(self.subscriber_cliff)
+        self.destroy_subscription(self.subscriber_ir_bumper)
+        self.destroy_subscription(self.subscriber_esp_sensors)
+        self.destroy_subscription(self.subscriber_dock_status)
+        self.destroy_subscription(self.subscriber_wifi_scanner)
+
+        self.get_logger().info('All done')
+        return TransitionCallbackReturn.SUCCESS
+
     def __enter__(self) -> Self:
         """
         Enter the object runtime context
@@ -413,48 +474,6 @@ class DataHarvesterChronicler(Node):
         :param exc_tb: exception traceback
         :return: None
         """
-        self.data_json_file.write(']')
-        self.data_json_file.close()
-
-        self.wifi_json_file.write(']')
-        self.wifi_json_file.close()
-
-        # self.video_writer.release()
-
-        # Create resulting archive with harvested data
-        with ZipFile(self.archive_path, 'w') as zip_file:
-            self.get_logger().info('Saving zip archive with harvested data to workspace dir...')
-
-            # try:
-            #     zip_file.write(self.video_name)
-            # except FileNotFoundError:
-            #     self.get_logger().error('Video has not been harvested')
-
-            try:
-                zip_file.write(self.data_json_path)
-            except FileNotFoundError:
-                self.get_logger().error('Robot data has not been harvested')
-
-            try:
-                zip_file.write(self.wifi_json_path)
-            except FileNotFoundError:
-                self.get_logger().error('Wi-Fi scanning has not been harvested')
-
-        # Garbage removal routine
-        # try:
-        #     os.remove(self.video_path)
-        # except FileNotFoundError:
-        #     pass
-        try:
-            os.remove(self.data_json_path)
-        except FileNotFoundError:
-            pass
-        try:
-            os.remove(self.wifi_json_path)
-        except FileNotFoundError:
-            pass
-
-        self.get_logger().info('All done')
 
 
 def main(args=None) -> None:
@@ -466,7 +485,7 @@ def main(args=None) -> None:
         try:
             executor.add_node(data_harvester_chronicler)
             executor.spin()
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
             data_harvester_chronicler.get_logger().warn("Killing the chronicler node...")
             executor.remove_node(data_harvester_chronicler)
             executor.shutdown()
