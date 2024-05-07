@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>data_harvester_chronicler</name>
-  <version>0.0.2</version>
+  <version>0.0.3</version>
   <description>The package for recording all harvested data</description>
   <maintainer email="fingerling42@proton.me">Ivan Berman</maintainer>
   <license>Apache-2.0</license>
@@ -16,6 +16,7 @@
   <depend>std_msgs</depend>
   <depend>data_harvester_interfaces</depend>
   <depend>robonomics_ros2_pubsub</depend>
+  <depend>robonomics_ros2_robot_handler</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

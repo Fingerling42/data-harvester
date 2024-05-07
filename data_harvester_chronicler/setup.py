@@ -7,7 +7,7 @@ package_name = 'data_harvester_chronicler'
 
 setup(
     name=package_name,
-    version='0.0.2',
+    version='0.0.3',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'data_harvester_chronicler = data_harvester_chronicler.data_harvester_chronicler:main',
+            'data_harvester_robonomics = data_harvester_chronicler.data_harvester_robonomics:main',
         ],
     },
 )

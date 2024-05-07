@@ -38,12 +38,20 @@ def generate_launch_description():
         emulate_tty=True,
     )
 
+    # Launch DH Robonomics node
+    data_harvester_robonomics = Node(
+        package='data_harvester_chronicler',
+        executable='data_harvester_robonomics',
+        emulate_tty=True,
+    )
+
     # Run all nodes with same namespace
     namespace_launch_action = GroupAction(
         actions=[
             PushRosNamespace(LaunchConfiguration('namespace')),
             robonomics_pubsub_node,
-            data_harvester_chronicler
+            data_harvester_chronicler,
+            data_harvester_robonomics
         ]
     )
 
