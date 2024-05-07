@@ -13,6 +13,7 @@
   <depend>message_filters</depend>
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>data_harvester_interfaces</depend>
   <depend>robonomics_ros2_pubsub</depend>
 
