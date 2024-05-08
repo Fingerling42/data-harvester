@@ -1,0 +1,15 @@
+[Unit]
+After=network-online.target
+Description="Bring up for IPFS daemon"
+
+[Service]
+
+User=ubuntu
+Group=ubuntu
+ExecStart=/bin/bash -c 'ipfs daemon'
+RemainAfterExit=no
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target
