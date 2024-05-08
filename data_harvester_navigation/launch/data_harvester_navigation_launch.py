@@ -31,8 +31,7 @@ def generate_launch_description():
             get_package_share_directory('turtlebot4_navigation'), 'launch'),
             '/localization.launch.py']),
         launch_arguments={
-            'params': config_localization,
-            'log_level': 'error',
+            'params': config_localization
         }.items()
     )
 

@@ -16,7 +16,7 @@ class DataHarvesterNavigator(TurtleBot4Navigator):
         # Set initial pose
         initial_pose = self.getPoseStamped(
             [0.0, 0.0],
-            171.8)
+            173.42)
         self.setInitialPose(initial_pose)
 
         # Undock if docked
