@@ -1,11 +1,9 @@
 from launch import LaunchDescription
-from launch_ros.actions import Node
 
 import os
 from ament_index_python.packages import get_package_share_directory
 
-from launch.actions import IncludeLaunchDescription
-from launch.actions import TimerAction
+from launch.actions import IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
@@ -31,7 +29,7 @@ def generate_launch_description():
             get_package_share_directory('turtlebot4_navigation'), 'launch'),
             '/localization.launch.py']),
         launch_arguments={
-            'params': config_localization
+            'params': config_localization,
         }.items()
     )
 
@@ -49,19 +47,7 @@ def generate_launch_description():
         actions=[turtlebot4_navigation]
     )
 
-    # Creating node for preparing navigation with data harvesting
-    data_harvester_navigator = Node(
-        package='data_harvester_navigation',
-        executable='data_harvester_navigator',
-    )
-
-    navigator_timer = TimerAction(
-        period=10.0,
-        actions=[data_harvester_navigator]
-    )
-
     ld.add_action(turtlebot4_localization)
-    ld.add_action(navigator_timer)
     ld.add_action(nav2_timer)
 
     return ld
